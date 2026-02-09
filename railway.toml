@@ -1,6 +1,5 @@
 [build]
 rootDir = "backend"
-dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "node dist/main.js"
