@@ -1,0 +1,112 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
+import { Tenant } from './tenant.entity';
+import { ChannelType } from './sender.entity';
+
+export enum PhoneNumberAllocationStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  PENDING = 'pending',
+}
+
+export enum PhoneNumberProvider {
+  TWILIO = 'twilio',
+  OPENPHONE = 'openphone',
+  WHATSAPP = 'whatsapp',
+}
+
+@Entity('tenant_phone_numbers')
+@Index(['workspaceId', 'phoneNumber'], { unique: true })
+@Index(['tenantId'])
+export class TenantPhoneNumber {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column({ name: 'workspace_id' })
+  @Index()
+  workspaceId: string;
+
+  @Column({ name: 'tenant_id' })
+  tenantId: string;
+
+  @ManyToOne(() => Tenant, (tenant) => tenant.phoneNumbers, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenant_id' })
+  tenant: Tenant;
+
+  @Column({ name: 'phone_number' })
+  phoneNumber: string;
+
+  @Column({ name: 'friendly_name', nullable: true })
+  friendlyName?: string;
+
+  @Column({
+    type: 'enum',
+    enum: PhoneNumberProvider,
+  })
+  provider: PhoneNumberProvider;
+
+  @Column({ name: 'provider_id', nullable: true })
+  providerId?: string;
+
+  @Column({
+    type: 'enum',
+    enum: ChannelType,
+    default: ChannelType.SMS,
+  })
+  channel: ChannelType;
+
+  @Column({
+    type: 'enum',
+    enum: PhoneNumberAllocationStatus,
+    default: PhoneNumberAllocationStatus.ACTIVE,
+  })
+  status: PhoneNumberAllocationStatus;
+
+  @Column({ name: 'is_default', default: false })
+  isDefault: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata?: Record<string, unknown>;
+
+  // ==================== PROVISIONING FIELDS ====================
+
+  @Column({ name: 'provisioned_via_callio', default: false })
+  provisionedViaCallio: boolean;
+
+  @Column({ name: 'order_id', nullable: true })
+  orderId?: string;
+
+  @Column({ name: 'monthly_cost', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  monthlyCost?: number;
+
+  @Column({ name: 'provisioned_at', nullable: true })
+  provisionedAt?: Date;
+
+  // ==================== A2P 10DLC FIELDS ====================
+
+  @Column({ name: 'messaging_service_sid', nullable: true })
+  messagingServiceSid?: string;
+
+  @Column({ name: 'a2p_campaign_id', nullable: true })
+  a2pCampaignId?: string;
+
+  @Column({ name: 'a2p_status', nullable: true })
+  a2pStatus?: string;
+
+  @Column({ name: 'a2p_attached_at', nullable: true })
+  a2pAttachedAt?: Date;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+}

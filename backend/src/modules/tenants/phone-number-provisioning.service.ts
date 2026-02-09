@@ -1,0 +1,688 @@
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import {
+  TenantPhoneNumber,
+  PhoneNumberAllocationStatus,
+  PhoneNumberProvider,
+  CommunicationIntegration,
+  Tenant,
+  PhoneNumberOrder,
+  PhoneNumberOrderType,
+  PhoneNumberOrderStatus,
+  PhoneNumberPricing,
+  PricingType,
+} from '../../database/entities';
+import { IntegrationStatus, ProviderType } from '../../database/entities/communication-integration.entity';
+import { ChannelType } from '../../database/entities/sender.entity';
+import { EncryptionService } from '../../common/services/encryption.service';
+import { TwilioProvider } from '../communication/providers/twilio.provider';
+
+export interface AvailableNumberWithPricing {
+  phoneNumber: string;
+  locality?: string;
+  region?: string;
+  country: string;
+  capabilities: string[];
+  // Pricing breakdown
+  twilioCost: number;
+  markupAmount: number;
+  totalMonthlyPrice: number;
+  setupFee: number;
+}
+
+export interface PurchaseResult {
+  success: boolean;
+  order: PhoneNumberOrder;
+  allocation?: TenantPhoneNumber;
+  error?: string;
+}
+
+export interface ReleaseResult {
+  success: boolean;
+  order: PhoneNumberOrder;
+  error?: string;
+}
+
+export interface PricingConfig {
+  pricingType: PricingType;
+  monthlyBasePrice?: number;
+  monthlyMarkupAmount: number;
+  monthlyMarkupPercentage: number;
+  setupFee: number;
+  allowTenantPurchase: boolean;
+  allowTenantRelease: boolean;
+  messagingServiceSid?: string;
+}
+
+@Injectable()
+export class PhoneNumberProvisioningService {
+  private readonly logger = new Logger(PhoneNumberProvisioningService.name);
+
+  // Default Twilio monthly cost for US local numbers (approximate)
+  private readonly DEFAULT_TWILIO_MONTHLY_COST = 1.15;
+
+  constructor(
+    @InjectRepository(PhoneNumberOrder)
+    private orderRepo: Repository<PhoneNumberOrder>,
+    @InjectRepository(PhoneNumberPricing)
+    private pricingRepo: Repository<PhoneNumberPricing>,
+    @InjectRepository(TenantPhoneNumber)
+    private tenantPhoneRepo: Repository<TenantPhoneNumber>,
+    @InjectRepository(CommunicationIntegration)
+    private integrationRepo: Repository<CommunicationIntegration>,
+    @InjectRepository(Tenant)
+    private tenantRepo: Repository<Tenant>,
+    private encryptionService: EncryptionService,
+    private twilioProvider: TwilioProvider,
+    private configService: ConfigService,
+  ) {}
+
+  /**
+   * Search available phone numbers with pricing information
+   */
+  async searchAvailableNumbers(
+    workspaceId: string,
+    country: string,
+    areaCode?: string,
+    options?: { smsCapable?: boolean; voiceCapable?: boolean },
+  ): Promise<AvailableNumberWithPricing[]> {
+    this.logger.log(`Searching available numbers: workspace=${workspaceId}, country=${country}, areaCode=${areaCode}`);
+
+    // Get Twilio integration
+    const integration = await this.integrationRepo.findOne({
+      where: { workspaceId, provider: ProviderType.TWILIO, status: IntegrationStatus.ACTIVE },
+    });
+
+    if (!integration) {
+      throw new BadRequestException('No active Twilio integration found. Please connect Twilio first.');
+    }
+
+    const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
+
+    // Search Twilio for available numbers
+    const availableNumbers = await this.twilioProvider.searchAvailableNumbers(
+      credentials,
+      country,
+      areaCode,
+    );
+
+    // Get pricing config
+    const pricingConfig = await this.getPricingConfig(workspaceId);
+
+    // Map to response with pricing
+    return availableNumbers.map((num) => {
+      const pricing = this.calculatePrice(pricingConfig, country);
+      return {
+        phoneNumber: num.phoneNumber,
+        locality: num.locality,
+        region: num.region,
+        country,
+        capabilities: num.capabilities || [],
+        twilioCost: pricing.twilioCost,
+        markupAmount: pricing.markupAmount,
+        totalMonthlyPrice: pricing.totalPrice,
+        setupFee: pricing.setupFee,
+      };
+    });
+  }
+
+  /**
+   * Purchase a phone number for a tenant
+   */
+  async purchaseNumber(
+    workspaceId: string,
+    tenantId: string,
+    phoneNumber: string,
+    orderedBy?: string,
+    friendlyName?: string,
+  ): Promise<PurchaseResult> {
+    this.logger.log(`Purchasing number: workspace=${workspaceId}, tenant=${tenantId}, number=${phoneNumber}`);
+
+    // Verify tenant exists
+    const tenant = await this.tenantRepo.findOne({
+      where: { id: tenantId, workspaceId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    // Get Twilio integration
+    const integration = await this.integrationRepo.findOne({
+      where: { workspaceId, provider: ProviderType.TWILIO, status: IntegrationStatus.ACTIVE },
+    });
+
+    if (!integration) {
+      throw new BadRequestException('No active Twilio integration found');
+    }
+
+    // Get pricing
+    const pricingConfig = await this.getPricingConfig(workspaceId);
+    const pricing = this.calculatePrice(pricingConfig, 'US'); // TODO: Detect country from number
+
+    // Create order record
+    const order = this.orderRepo.create({
+      workspaceId,
+      tenantId,
+      phoneNumber,
+      orderType: PhoneNumberOrderType.PURCHASE,
+      status: PhoneNumberOrderStatus.PENDING,
+      twilioCost: pricing.twilioCost,
+      markupAmount: pricing.markupAmount,
+      totalPrice: pricing.totalPrice,
+      orderedBy,
+      metadata: {},
+    });
+    await this.orderRepo.save(order);
+
+    try {
+      // Update status to provisioning
+      order.status = PhoneNumberOrderStatus.PROVISIONING;
+      await this.orderRepo.save(order);
+
+      // Purchase from Twilio
+      const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
+      const purchased = await this.twilioProvider.purchasePhoneNumber(credentials, phoneNumber);
+
+      order.phoneNumberSid = purchased.sid;
+      order.metadata = {
+        ...order.metadata,
+        capabilities: purchased.capabilities,
+        friendlyName: purchased.friendlyName,
+      };
+
+      // Configure webhooks on the new number
+      const baseUrl = this.configService.get('BASE_URL');
+      if (baseUrl) {
+        // Use workspaceId as the webhookId for Twilio webhooks
+        const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspaceId}`;
+        const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspaceId}`;
+
+        await this.twilioProvider.configureWebhooks(
+          credentials,
+          purchased.sid,
+          smsWebhookUrl,
+          voiceWebhookUrl,
+        );
+      }
+
+      // Attach to Messaging Service for A2P 10DLC compliance
+      let a2pStatus: string | undefined = undefined;
+      let a2pMessagingServiceSid: string | undefined;
+      let a2pAttachedAt: Date | undefined;
+
+      if (purchased.capabilities?.includes('sms')) {
+        const a2pResult = await this.attachToMessagingService(
+          credentials,
+          purchased.sid,
+          workspaceId,
+        );
+
+        if (a2pResult.success) {
+          a2pStatus = 'ready';
+          a2pMessagingServiceSid = a2pResult.messagingServiceSid;
+          a2pAttachedAt = new Date();
+          this.logger.log(`A2P attachment successful for ${phoneNumber}`);
+        } else if (a2pResult.error === 'no_messaging_service_configured') {
+          a2pStatus = undefined;
+        } else {
+          a2pStatus = 'failed';
+          a2pMessagingServiceSid = a2pResult.messagingServiceSid;
+          this.logger.warn(`A2P attachment failed for ${phoneNumber}: ${a2pResult.error}`);
+        }
+      }
+
+      order.metadata = {
+        ...order.metadata,
+        a2pStatus,
+        a2pMessagingServiceSid,
+      };
+
+      // Allocate to tenant
+      const allocation = this.tenantPhoneRepo.create({
+        workspaceId,
+        tenantId,
+        phoneNumber: purchased.phoneNumber,
+        friendlyName: friendlyName || purchased.friendlyName,
+        provider: PhoneNumberProvider.TWILIO,
+        providerId: purchased.sid,
+        channel: ChannelType.SMS,
+        status: PhoneNumberAllocationStatus.ACTIVE,
+        isDefault: false,
+        provisionedViaCallio: true,
+        orderId: order.id,
+        monthlyCost: pricing.totalPrice,
+        provisionedAt: new Date(),
+        messagingServiceSid: a2pMessagingServiceSid,
+        a2pStatus,
+        a2pAttachedAt,
+        metadata: {
+          capabilities: purchased.capabilities,
+        },
+      });
+      await this.tenantPhoneRepo.save(allocation);
+
+      // Update order with allocation reference
+      order.tenantPhoneNumberId = allocation.id;
+      order.status = PhoneNumberOrderStatus.ACTIVE;
+      order.completedAt = new Date();
+      await this.orderRepo.save(order);
+
+      this.logger.log(`Successfully purchased ${phoneNumber} for tenant ${tenantId}`);
+
+      return {
+        success: true,
+        order,
+        allocation,
+      };
+    } catch (error) {
+      // Update order with failure
+      order.status = PhoneNumberOrderStatus.FAILED;
+      order.metadata = {
+        ...order.metadata,
+        errorMessage: error.message,
+      };
+      await this.orderRepo.save(order);
+
+      this.logger.error(`Failed to purchase ${phoneNumber}: ${error.message}`);
+
+      return {
+        success: false,
+        order,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Release a phone number from a tenant
+   */
+  async releaseNumber(
+    workspaceId: string,
+    tenantId: string,
+    allocationId: string,
+    orderedBy?: string,
+  ): Promise<ReleaseResult> {
+    this.logger.log(`Releasing number: workspace=${workspaceId}, tenant=${tenantId}, allocation=${allocationId}`);
+
+    // Get allocation
+    const allocation = await this.tenantPhoneRepo.findOne({
+      where: { id: allocationId, workspaceId, tenantId },
+    });
+
+    if (!allocation) {
+      throw new NotFoundException('Phone number allocation not found');
+    }
+
+    if (!allocation.provisionedViaCallio) {
+      throw new BadRequestException('Cannot release a number that was not provisioned through Callio');
+    }
+
+    // Get Twilio integration
+    const integration = await this.integrationRepo.findOne({
+      where: { workspaceId, provider: ProviderType.TWILIO, status: IntegrationStatus.ACTIVE },
+    });
+
+    if (!integration) {
+      throw new BadRequestException('No active Twilio integration found');
+    }
+
+    // Create release order
+    const order = this.orderRepo.create({
+      workspaceId,
+      tenantId,
+      phoneNumber: allocation.phoneNumber,
+      phoneNumberSid: allocation.providerId,
+      orderType: PhoneNumberOrderType.RELEASE,
+      status: PhoneNumberOrderStatus.RELEASING,
+      tenantPhoneNumberId: allocation.id,
+      orderedBy,
+      metadata: {},
+    });
+    await this.orderRepo.save(order);
+
+    try {
+      const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
+
+      // Remove from Messaging Service if attached
+      if (allocation.messagingServiceSid && allocation.providerId) {
+        await this.twilioProvider.removeNumberFromMessagingService(
+          credentials,
+          allocation.messagingServiceSid,
+          allocation.providerId,
+        ).catch((err) => {
+          this.logger.warn(`Failed to remove from Messaging Service (non-blocking): ${err.message}`);
+        });
+      }
+
+      // Release from Twilio
+      await this.twilioProvider.releasePhoneNumber(credentials, allocation.providerId!);
+
+      // Deallocate from tenant
+      await this.tenantPhoneRepo.remove(allocation);
+
+      // Update order
+      order.status = PhoneNumberOrderStatus.RELEASED;
+      order.completedAt = new Date();
+      order.tenantPhoneNumberId = undefined; // Allocation no longer exists
+      await this.orderRepo.save(order);
+
+      this.logger.log(`Successfully released ${allocation.phoneNumber} from tenant ${tenantId}`);
+
+      return {
+        success: true,
+        order,
+      };
+    } catch (error) {
+      // Update order with failure
+      order.status = PhoneNumberOrderStatus.FAILED;
+      order.metadata = {
+        ...order.metadata,
+        errorMessage: error.message,
+      };
+      await this.orderRepo.save(order);
+
+      this.logger.error(`Failed to release ${allocation.phoneNumber}: ${error.message}`);
+
+      return {
+        success: false,
+        order,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Get order history for a tenant
+   */
+  async getTenantOrderHistory(
+    workspaceId: string,
+    tenantId: string,
+  ): Promise<PhoneNumberOrder[]> {
+    return this.orderRepo.find({
+      where: { workspaceId, tenantId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Get all orders for a workspace
+   */
+  async getWorkspaceOrderHistory(workspaceId: string): Promise<PhoneNumberOrder[]> {
+    return this.orderRepo.find({
+      where: { workspaceId },
+      order: { createdAt: 'DESC' },
+      relations: ['tenant'],
+    });
+  }
+
+  /**
+   * Get pricing configuration for a workspace
+   */
+  async getPricingConfig(workspaceId: string): Promise<PricingConfig> {
+    const pricing = await this.pricingRepo.findOne({
+      where: { workspaceId },
+    });
+
+    if (!pricing) {
+      // Return default pricing
+      return {
+        pricingType: PricingType.FIXED_MARKUP,
+        monthlyMarkupAmount: 0.50, // $0.50 default markup
+        monthlyMarkupPercentage: 0,
+        setupFee: 0,
+        allowTenantPurchase: false,
+        allowTenantRelease: false,
+      };
+    }
+
+    return {
+      pricingType: pricing.pricingType,
+      monthlyBasePrice: pricing.monthlyBasePrice ? Number(pricing.monthlyBasePrice) : undefined,
+      monthlyMarkupAmount: Number(pricing.monthlyMarkupAmount),
+      monthlyMarkupPercentage: Number(pricing.monthlyMarkupPercentage),
+      setupFee: Number(pricing.setupFee),
+      allowTenantPurchase: pricing.allowTenantPurchase,
+      allowTenantRelease: pricing.allowTenantRelease,
+      messagingServiceSid: pricing.messagingServiceSid || undefined,
+    };
+  }
+
+  /**
+   * Update pricing configuration for a workspace
+   */
+  async updatePricingConfig(
+    workspaceId: string,
+    config: Partial<PricingConfig>,
+  ): Promise<PhoneNumberPricing> {
+    let pricing = await this.pricingRepo.findOne({
+      where: { workspaceId },
+    });
+
+    if (!pricing) {
+      pricing = this.pricingRepo.create({
+        workspaceId,
+      });
+    }
+
+    if (config.pricingType !== undefined) {
+      pricing.pricingType = config.pricingType;
+    }
+    if (config.monthlyBasePrice !== undefined) {
+      pricing.monthlyBasePrice = config.monthlyBasePrice;
+    }
+    if (config.monthlyMarkupAmount !== undefined) {
+      pricing.monthlyMarkupAmount = config.monthlyMarkupAmount;
+    }
+    if (config.monthlyMarkupPercentage !== undefined) {
+      pricing.monthlyMarkupPercentage = config.monthlyMarkupPercentage;
+    }
+    if (config.setupFee !== undefined) {
+      pricing.setupFee = config.setupFee;
+    }
+    if (config.allowTenantPurchase !== undefined) {
+      pricing.allowTenantPurchase = config.allowTenantPurchase;
+    }
+    if (config.allowTenantRelease !== undefined) {
+      pricing.allowTenantRelease = config.allowTenantRelease;
+    }
+    if (config.messagingServiceSid !== undefined) {
+      pricing.messagingServiceSid = config.messagingServiceSid;
+    }
+
+    return this.pricingRepo.save(pricing);
+  }
+
+  /**
+   * Calculate price for a phone number based on workspace pricing config
+   */
+  calculatePrice(
+    config: PricingConfig,
+    country: string,
+    twilioCost?: number,
+  ): { twilioCost: number; markupAmount: number; totalPrice: number; setupFee: number } {
+    const baseCost = twilioCost ?? this.DEFAULT_TWILIO_MONTHLY_COST;
+
+    let markupAmount = 0;
+    let totalPrice = 0;
+
+    switch (config.pricingType) {
+      case PricingType.FIXED_MARKUP:
+        markupAmount = config.monthlyMarkupAmount;
+        totalPrice = baseCost + markupAmount;
+        break;
+
+      case PricingType.PERCENTAGE_MARKUP:
+        markupAmount = baseCost * (config.monthlyMarkupPercentage / 100);
+        totalPrice = baseCost + markupAmount;
+        break;
+
+      case PricingType.FIXED_PRICE:
+        totalPrice = config.monthlyBasePrice ?? baseCost;
+        markupAmount = totalPrice - baseCost;
+        break;
+    }
+
+    return {
+      twilioCost: baseCost,
+      markupAmount: Math.round(markupAmount * 100) / 100,
+      totalPrice: Math.round(totalPrice * 100) / 100,
+      setupFee: config.setupFee,
+    };
+  }
+
+  /**
+   * Check if tenant is allowed to purchase numbers
+   */
+  async canTenantPurchase(workspaceId: string): Promise<boolean> {
+    const config = await this.getPricingConfig(workspaceId);
+    return config.allowTenantPurchase;
+  }
+
+  /**
+   * Check if tenant is allowed to release numbers
+   */
+  async canTenantRelease(workspaceId: string): Promise<boolean> {
+    const config = await this.getPricingConfig(workspaceId);
+    return config.allowTenantRelease;
+  }
+
+  /**
+   * Tenant self-service purchase (with permission check)
+   */
+  async tenantPurchaseNumber(
+    workspaceId: string,
+    tenantId: string,
+    phoneNumber: string,
+    friendlyName?: string,
+  ): Promise<PurchaseResult> {
+    const canPurchase = await this.canTenantPurchase(workspaceId);
+    if (!canPurchase) {
+      throw new ForbiddenException('Tenant self-service phone number purchase is not enabled for this workspace');
+    }
+
+    return this.purchaseNumber(workspaceId, tenantId, phoneNumber, undefined, friendlyName);
+  }
+
+  /**
+   * Tenant self-service release (with permission check)
+   */
+  async tenantReleaseNumber(
+    workspaceId: string,
+    tenantId: string,
+    allocationId: string,
+  ): Promise<ReleaseResult> {
+    const canRelease = await this.canTenantRelease(workspaceId);
+    if (!canRelease) {
+      throw new ForbiddenException('Tenant self-service phone number release is not enabled for this workspace');
+    }
+
+    return this.releaseNumber(workspaceId, tenantId, allocationId);
+  }
+
+  /**
+   * Retry A2P Messaging Service attachment for a phone number
+   */
+  async retryA2PAttachment(
+    workspaceId: string,
+    allocationId: string,
+  ): Promise<{ success: boolean; a2pStatus: string; error?: string }> {
+    const allocation = await this.tenantPhoneRepo.findOne({
+      where: { id: allocationId, workspaceId },
+    });
+
+    if (!allocation) {
+      throw new NotFoundException('Phone number allocation not found');
+    }
+
+    if (!allocation.provisionedViaCallio || !allocation.providerId) {
+      throw new BadRequestException('Can only retry A2P for Callio-provisioned numbers');
+    }
+
+    if (allocation.a2pStatus === 'ready') {
+      return { success: true, a2pStatus: 'ready' };
+    }
+
+    const integration = await this.integrationRepo.findOne({
+      where: { workspaceId, provider: ProviderType.TWILIO, status: IntegrationStatus.ACTIVE },
+    });
+
+    if (!integration) {
+      throw new BadRequestException('No active Twilio integration found');
+    }
+
+    const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
+    const result = await this.attachToMessagingService(credentials, allocation.providerId, workspaceId);
+
+    allocation.a2pStatus = result.success ? 'ready' : 'failed';
+    allocation.messagingServiceSid = result.messagingServiceSid || allocation.messagingServiceSid;
+    if (result.success) {
+      allocation.a2pAttachedAt = new Date();
+    }
+    await this.tenantPhoneRepo.save(allocation);
+
+    return {
+      success: result.success,
+      a2pStatus: allocation.a2pStatus,
+      error: result.error,
+    };
+  }
+
+  /**
+   * Attach a phone number to the workspace's Messaging Service with retry
+   */
+  private async attachToMessagingService(
+    credentials: string,
+    phoneNumberSid: string,
+    workspaceId: string,
+    maxRetries = 3,
+  ): Promise<{ success: boolean; messagingServiceSid?: string; error?: string }> {
+    const pricing = await this.pricingRepo.findOne({ where: { workspaceId } });
+    const messagingServiceSid = pricing?.messagingServiceSid;
+
+    if (!messagingServiceSid) {
+      this.logger.warn(`No Messaging Service SID configured for workspace ${workspaceId}`);
+      return { success: false, error: 'no_messaging_service_configured' };
+    }
+
+    let lastError: string | undefined;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const result = await this.twilioProvider.addNumberToMessagingService(
+        credentials,
+        messagingServiceSid,
+        phoneNumberSid,
+      );
+
+      if (result.success) {
+        return { success: true, messagingServiceSid };
+      }
+
+      lastError = result.error;
+      this.logger.warn(`A2P attachment attempt ${attempt}/${maxRetries} failed: ${result.error}`);
+
+      // Treat "already exists" as success
+      if (result.error?.includes('already exists') || result.error?.includes('21710')) {
+        return { success: true, messagingServiceSid };
+      }
+
+      // Don't retry non-transient errors
+      if (result.error?.includes('not found') || result.error?.includes('invalid')) {
+        break;
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+    }
+
+    return { success: false, messagingServiceSid, error: lastError };
+  }
+}

@@ -1,0 +1,117 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Header,
+} from '@nestjs/common';
+import { CommunicationService } from './communication.service';
+import { SigcoreAuthGuard } from '../auth/sigcore-auth.guard';
+import { WorkspaceId } from '../auth/decorators/workspace-id.decorator';
+import { SendMessageDto } from './dto';
+
+@Controller('conversations')
+@UseGuards(SigcoreAuthGuard)
+export class ConversationsController {
+  constructor(private readonly communicationService: CommunicationService) {}
+
+  @Get()
+  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  async getConversations(
+    @WorkspaceId() workspaceId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('phoneNumberId') phoneNumberId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('provider') provider?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+
+    const result = await this.communicationService.getConversations(workspaceId, {
+      page: pageNum,
+      limit: limitNum,
+      search,
+      phoneNumberId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      provider: provider as 'openphone' | 'twilio' | undefined,
+    });
+    return { data: result.conversations, meta: result.meta };
+  }
+
+  @Get(':id/messages')
+  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  async getMessages(
+    @Param('id') conversationId: string,
+    @WorkspaceId() workspaceId: string,
+  ) {
+    const messages = await this.communicationService.getMessagesForConversation(
+      workspaceId,
+      conversationId,
+    );
+    return { data: messages };
+  }
+
+  @Get(':id/calls')
+  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  async getCalls(
+    @Param('id') conversationId: string,
+    @WorkspaceId() workspaceId: string,
+  ) {
+    const calls = await this.communicationService.getCallsForConversation(
+      workspaceId,
+      conversationId,
+    );
+    return { data: calls };
+  }
+
+  @Post(':id/sync')
+  @HttpCode(HttpStatus.OK)
+  async syncConversation(
+    @Param('id') conversationId: string,
+    @WorkspaceId() workspaceId: string,
+  ) {
+    const result = await this.communicationService.syncSingleConversation(
+      workspaceId,
+      conversationId,
+    );
+    return { data: result };
+  }
+
+  @Post(':id/messages')
+  @HttpCode(HttpStatus.CREATED)
+  async sendMessage(
+    @Param('id') conversationId: string,
+    @WorkspaceId() workspaceId: string,
+    @Body() dto: SendMessageDto,
+  ) {
+    const message = await this.communicationService.sendMessageToConversation(
+      workspaceId,
+      conversationId,
+      dto.body,
+      dto.fromNumber,
+    );
+    return { data: message };
+  }
+
+  @Delete(':id/contact')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async unlinkContact(
+    @Param('id') conversationId: string,
+    @WorkspaceId() workspaceId: string,
+  ) {
+    await this.communicationService.unlinkContactFromConversation(
+      workspaceId,
+      conversationId,
+    );
+  }
+}
