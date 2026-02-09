@@ -1,0 +1,5 @@
+[build]
+rootDir = "backend"
+
+[deploy]
+startCommand = "node dist/main.js"
