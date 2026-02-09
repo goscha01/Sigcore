@@ -7,6 +7,6 @@ import { SigcoreAuthGuard } from './sigcore-auth.guard';
 @Module({
   imports: [TypeOrmModule.forFeature([ApiKey])],
   providers: [SigcoreAuthGuard],
-  exports: [SigcoreAuthGuard],
+  exports: [SigcoreAuthGuard, TypeOrmModule],
 })
 export class SigcoreAuthModule {}
