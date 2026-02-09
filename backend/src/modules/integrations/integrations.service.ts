@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import {
   CommunicationIntegration,
   ProviderType,
@@ -58,6 +59,29 @@ export class IntegrationsService {
     private twilioVoiceService: TwilioVoiceService,
     private configService: ConfigService,
   ) {}
+
+  /**
+   * Find or create a workspace record. Since the auth guard already validates
+   * the service key, we trust the workspaceId and auto-create the reference
+   * record when it doesn't exist (first time a workspace uses Sigcore).
+   */
+  private async ensureWorkspace(workspaceId: string): Promise<Workspace> {
+    let workspace = await this.workspaceRepo.findOne({
+      where: { id: workspaceId },
+    });
+
+    if (!workspace) {
+      this.logger.log(`Auto-creating workspace record for ${workspaceId}`);
+      workspace = this.workspaceRepo.create({
+        id: workspaceId,
+        name: `Workspace ${workspaceId.substring(0, 8)}`,
+        webhookId: crypto.randomBytes(16).toString('hex'),
+      });
+      await this.workspaceRepo.save(workspace);
+    }
+
+    return workspace;
+  }
 
   /**
    * Get integration by provider type. If no provider specified, returns the first active integration.
@@ -144,14 +168,8 @@ export class IntegrationsService {
 
     const encryptedCredentials = this.encryptionService.encrypt(credentials);
 
-    // Get workspace to construct webhook URL
-    const workspace = await this.workspaceRepo.findOne({
-      where: { id: workspaceId },
-    });
-
-    if (!workspace) {
-      throw new NotFoundException('Workspace not found');
-    }
+    // Get or create workspace to construct webhook URL
+    const workspace = await this.ensureWorkspace(workspaceId);
 
     const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
     const webhookUrl = `${baseUrl}/api/webhooks/openphone/${workspace.webhookId}`;
@@ -243,14 +261,8 @@ export class IntegrationsService {
       throw new BadRequestException('Invalid Twilio credentials');
     }
 
-    // Get workspace to construct webhook URL
-    const workspace = await this.workspaceRepo.findOne({
-      where: { id: workspaceId },
-    });
-
-    if (!workspace) {
-      throw new NotFoundException('Workspace not found');
-    }
+    // Get or create workspace to construct webhook URL
+    const workspace = await this.ensureWorkspace(workspaceId);
 
     const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
     const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspace.webhookId}`;
@@ -537,15 +549,7 @@ export class IntegrationsService {
     this.logger.log(`========== GENERATE VOICE TOKEN START ==========`);
     this.logger.log(`Workspace ID: ${workspaceId}`);
 
-    const workspace = await this.workspaceRepo.findOne({
-      where: { id: workspaceId },
-    });
-
-    if (!workspace) {
-      this.logger.error(`Workspace not found: ${workspaceId}`);
-      throw new NotFoundException('Workspace not found');
-    }
-
+    const workspace = await this.ensureWorkspace(workspaceId);
     this.logger.log(`Found workspace: ${workspace.name}`);
 
     // Get Twilio integration with voice credentials
@@ -615,13 +619,7 @@ export class IntegrationsService {
     this.logger.log(`========== GET VOICE CONFIG START ==========`);
     this.logger.log(`Workspace ID: ${workspaceId}`);
 
-    const workspace = await this.workspaceRepo.findOne({
-      where: { id: workspaceId },
-    });
-
-    if (!workspace) {
-      throw new NotFoundException('Workspace not found');
-    }
+    const workspace = await this.ensureWorkspace(workspaceId);
 
     const integration = await this.integrationRepo.findOne({
       where: {
@@ -681,13 +679,7 @@ export class IntegrationsService {
     this.logger.log(`========== REFRESH VOICE WEBHOOK START ==========`);
     this.logger.log(`Workspace ID: ${workspaceId}`);
 
-    const workspace = await this.workspaceRepo.findOne({
-      where: { id: workspaceId },
-    });
-
-    if (!workspace) {
-      throw new NotFoundException('Workspace not found');
-    }
+    const workspace = await this.ensureWorkspace(workspaceId);
 
     const integration = await this.integrationRepo.findOne({
       where: {
