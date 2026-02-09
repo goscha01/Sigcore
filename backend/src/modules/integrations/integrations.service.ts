@@ -119,7 +119,7 @@ export class IntegrationsService {
       where: { id: integration.workspaceId },
     });
 
-    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
     const metadata = integration.metadata || {};
 
     // Determine webhook URL based on provider
@@ -171,8 +171,9 @@ export class IntegrationsService {
     // Get or create workspace to construct webhook URL
     const workspace = await this.ensureWorkspace(workspaceId);
 
-    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
     const webhookUrl = `${baseUrl}/api/webhooks/openphone/${workspace.webhookId}`;
+    this.logger.log(`Webhook URL for workspace ${workspaceId}: ${webhookUrl}`);
 
     let integration = await this.integrationRepo.findOne({
       where: { workspaceId, provider: dto.provider },
@@ -264,7 +265,7 @@ export class IntegrationsService {
     // Get or create workspace to construct webhook URL
     const workspace = await this.ensureWorkspace(workspaceId);
 
-    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
     const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspace.webhookId}`;
     const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
@@ -446,7 +447,7 @@ export class IntegrationsService {
     });
 
     if (workspace && dto.phoneNumberSid) {
-      const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+      const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
       const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspace.webhookId}`;
       const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
@@ -636,7 +637,7 @@ export class IntegrationsService {
     const decrypted = this.encryptionService.decrypt(integration.credentialsEncrypted);
     const credentials = JSON.parse(decrypted);
 
-    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
     const expectedWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
     // Get current webhook URL from Twilio
@@ -696,7 +697,7 @@ export class IntegrationsService {
     const decrypted = this.encryptionService.decrypt(integration.credentialsEncrypted);
     const credentials = JSON.parse(decrypted);
 
-    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3001';
+    const baseUrl = this.configService.get('BASE_URL') || 'http://localhost:3002';
     const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
     this.logger.log(`Updating TwiML App ${credentials.voiceTwimlAppSid} webhook to: ${voiceWebhookUrl}`);
