@@ -23,7 +23,7 @@ import { HealthController } from './health.controller';
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const isProduction = configService.get('NODE_ENV') === 'production';
-        const syncDb = !isProduction && configService.get('SYNC_DATABASE') === 'true';
+        const syncDb = configService.get('SYNC_DATABASE') === 'true';
         console.log(`Database sync enabled: ${syncDb} (NODE_ENV=${configService.get('NODE_ENV')}, isProduction=${isProduction})`);
         return {
           type: 'postgres',
