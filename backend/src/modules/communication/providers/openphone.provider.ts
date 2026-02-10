@@ -185,15 +185,22 @@ export class OpenPhoneProvider implements CommunicationProvider {
     }
   }
 
-  async getConversations(workspaceId: string, limit?: number, phoneNumberId?: string): Promise<ConversationData[]> {
+  async getConversations(workspaceId: string, limit?: number, phoneNumberId?: string, since?: Date): Promise<ConversationData[]> {
     try {
       const credentials = JSON.parse(workspaceId) as OpenPhoneCredentials;
       const client = this.createClient(credentials.apiKey);
 
-      this.logger.log(`Fetching conversations from OpenPhone with pagination... (limit: ${limit || 'none'}, phoneNumberId: ${phoneNumberId || 'all'})`);
+      this.logger.log(`Fetching conversations from OpenPhone with pagination... (limit: ${limit || 'none'}, phoneNumberId: ${phoneNumberId || 'all'}, since: ${since?.toISOString() || 'none'})`);
 
       // First, fetch phone numbers to get their display names
       const phoneNumberMap = await this.getPhoneNumbers(client);
+
+      // WORKAROUND: OpenPhone's /conversations endpoint has stale lastActivityAt values
+      // If a date filter is provided, use the /messages endpoint instead to find active conversations
+      if (since && phoneNumberId) {
+        this.logger.log(`Using message-based approach to find conversations with activity since ${since.toISOString()}`);
+        return this.getConversationsFromMessages(client, phoneNumberMap, phoneNumberId, since, limit);
+      }
 
       // Fetch conversations with pagination
       const allConversations: Record<string, unknown>[] = [];
@@ -287,6 +294,120 @@ export class OpenPhoneProvider implements CommunicationProvider {
       }
       throw error;
     }
+  }
+
+  /**
+   * Fetch conversations by querying messages endpoint with date filters.
+   * This is a workaround for OpenPhone's stale lastActivityAt field in /conversations endpoint.
+   * Uses the /messages endpoint to find conversations with actual recent activity.
+   */
+  private async getConversationsFromMessages(
+    client: AxiosInstance,
+    phoneNumberMap: Map<string, PhoneNumberInfo>,
+    phoneNumberId: string,
+    since: Date,
+    limit?: number,
+  ): Promise<ConversationData[]> {
+    this.logger.log(`Fetching messages since ${since.toISOString()} for phone ${phoneNumberId}`);
+
+    // Fetch messages with date filter
+    const params: Record<string, unknown> = {
+      phoneNumberId: phoneNumberId,
+      createdAfter: since.toISOString(),
+      maxResults: 100,
+    };
+
+    const allMessages: Array<Record<string, unknown>> = [];
+    let pageToken: string | null = null;
+    let pageCount = 0;
+    const maxPages = 50;
+
+    do {
+      if (pageToken) {
+        params.pageToken = pageToken;
+      }
+
+      const response = await client.get('/messages', { params });
+      const messages = response.data.data || [];
+      allMessages.push(...messages);
+
+      pageToken = response.data.nextPageToken || null;
+      pageCount++;
+
+      this.logger.log(`Fetched page ${pageCount}: ${messages.length} messages (total: ${allMessages.length})`);
+    } while (pageToken && pageCount < maxPages);
+
+    this.logger.log(`Fetched total of ${allMessages.length} messages since ${since.toISOString()}`);
+
+    // Group messages by participant to identify unique conversations
+    const conversationMap = new Map<string, {
+      participant: string;
+      messages: Array<Record<string, unknown>>;
+      lastMessageAt: Date;
+    }>();
+
+    for (const msg of allMessages) {
+      // Determine the external participant (not our phone number)
+      const from = msg.from as string;
+      const to = (msg.to as string[])?.[0] || msg.to as string;
+      const direction = msg.direction as string;
+      const participant = direction === 'incoming' ? from : to;
+
+      if (!participant) continue;
+
+      const existing = conversationMap.get(participant);
+      const msgDate = new Date(msg.createdAt as string);
+
+      if (!existing || msgDate > existing.lastMessageAt) {
+        conversationMap.set(participant, {
+          participant,
+          messages: existing ? [...existing.messages, msg] : [msg],
+          lastMessageAt: existing ? (msgDate > existing.lastMessageAt ? msgDate : existing.lastMessageAt) : msgDate,
+        });
+      } else {
+        existing.messages.push(msg);
+      }
+    }
+
+    this.logger.log(`Found ${conversationMap.size} unique conversations from messages`);
+
+    // Convert to ConversationData format
+    const phoneInfo = phoneNumberMap.get(phoneNumberId);
+    const conversations: ConversationData[] = [];
+
+    // Sort by most recent message first
+    const sortedEntries = Array.from(conversationMap.entries()).sort((a, b) =>
+      b[1].lastMessageAt.getTime() - a[1].lastMessageAt.getTime()
+    );
+
+    // Apply limit if specified
+    const limitedEntries = limit ? sortedEntries.slice(0, limit) : sortedEntries;
+
+    for (const [participant, data] of limitedEntries) {
+      // Generate a conversation ID based on phone number and participant
+      // This matches how OpenPhone structures conversation IDs
+      const conversationId = `${phoneNumberId}_${participant}`;
+
+      conversations.push({
+        externalId: conversationId,
+        phoneNumber: phoneInfo?.number || '',
+        participantPhoneNumber: participant,
+        participantPhoneNumbers: [participant],
+        createdAt: new Date(data.messages[data.messages.length - 1].createdAt as string), // oldest message
+        lastMessageAt: data.lastMessageAt,
+        metadata: {
+          phoneNumberId: phoneNumberId,
+          phoneNumberName: phoneInfo?.name,
+          participantCount: 1,
+          messageCount: data.messages.length,
+          // Mark this as derived from messages for debugging
+          derivedFromMessages: true,
+        },
+      });
+    }
+
+    this.logger.log(`Returning ${conversations.length} conversations with recent activity`);
+    return conversations;
   }
 
   async getMessages(workspaceId: string, conversationId: string, phoneNumberId?: string, participantPhoneNumber?: string): Promise<MessageData[]> {

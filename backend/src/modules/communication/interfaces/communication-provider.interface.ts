@@ -74,7 +74,7 @@ export interface CommunicationProvider {
 
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
 
-  getConversations(workspaceId: string, limit?: number, phoneNumberId?: string): Promise<ConversationData[]>;
+  getConversations(workspaceId: string, limit?: number, phoneNumberId?: string, since?: Date): Promise<ConversationData[]>;
 
   getMessages(
     workspaceId: string,

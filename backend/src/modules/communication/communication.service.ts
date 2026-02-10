@@ -1064,11 +1064,12 @@ export class CommunicationService {
         message: `Fetching conversations from ${providerName}...`,
       });
 
-      // Pass limit and phoneNumberId to provider so it can filter at API level
-      let conversations = await provider.getConversations(credentials, limit, phoneNumberId);
+      // Pass limit, phoneNumberId, and since filter to provider so it can filter at API level
+      // For OpenPhone, passing 'since' enables message-based filtering to work around stale lastActivityAt
+      let conversations = await provider.getConversations(credentials, limit, phoneNumberId, since);
       const conversationsFromProvider = conversations.length;
       result.conversationsFromProvider = conversationsFromProvider;
-      this.logger.log(`Fetched ${conversationsFromProvider} conversations from ${providerName}${phoneNumberId ? ` (filtered by phoneNumberId: ${phoneNumberId})` : ''}`);
+      this.logger.log(`Fetched ${conversationsFromProvider} conversations from ${providerName}${phoneNumberId ? ` (filtered by phoneNumberId: ${phoneNumberId})` : ''}${since ? ` since ${since.toISOString()}` : ''}`);
 
       // Apply date filter if specified (note: this may reduce count below limit)
       if (since || until) {

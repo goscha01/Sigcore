@@ -248,7 +248,7 @@ export class TwilioProvider implements CommunicationProvider {
     return Array.from(phoneNumberMap.values());
   }
 
-  async getConversations(workspaceId: string, limit?: number, phoneNumberId?: string): Promise<ConversationData[]> {
+  async getConversations(workspaceId: string, limit?: number, phoneNumberId?: string, since?: Date): Promise<ConversationData[]> {
     try {
       const credentials = JSON.parse(workspaceId) as TwilioCredentials;
       const client = this.createClient(credentials);
