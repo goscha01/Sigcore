@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search, ArrowUpRight, ArrowDownLeft, User } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search, ArrowUpRight, ArrowDownLeft, User, Wifi, WifiOff } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 import { adminApi } from '../../services/adminApi';
 
 interface TestResult {
@@ -31,6 +32,166 @@ export default function AdminIntegrationTestPage() {
   const [searchAreaCode, setSearchAreaCode] = useState('');
   const [searchLocality, setSearchLocality] = useState('');
   const [searchRegion, setSearchRegion] = useState('');
+
+  // Socket.IO state
+  const socketRef = useRef<Socket | null>(null);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [lastSocketEvent, setLastSocketEvent] = useState<string | null>(null);
+
+  // Connect to Socket.IO when we have a workspace ID
+  const connectSocket = useCallback(() => {
+    const workspaceId = adminApi.getWorkspaceId();
+    if (!workspaceId || socketRef.current?.connected) return;
+
+    // Disconnect existing socket if any
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+
+    const apiUrl = import.meta.env.VITE_API_URL as string | undefined;
+    const socketUrl = apiUrl && apiUrl.startsWith('http')
+      ? new URL(apiUrl).origin
+      : undefined;
+
+    const socket = io(socketUrl || window.location.origin, {
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      setSocketConnected(true);
+      socket.emit('join', workspaceId);
+    });
+
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+    });
+
+    // Listen for new messages - update conversation list in real time
+    socket.on('message:new', (data: any) => {
+      setLastSocketEvent(`New message from ${data.fromNumber || 'unknown'}`);
+      updateConversationFromMessage(data);
+    });
+
+    socket.on('conversation:update', (data: any) => {
+      setLastSocketEvent(`Conversation updated: ${data.participantPhoneNumber || 'unknown'}`);
+      updateConversationFromWebhook(data);
+    });
+
+    socket.on('conversation:new', (data: any) => {
+      setLastSocketEvent(`New conversation: ${data.participantPhoneNumber || 'unknown'}`);
+      addNewConversation(data);
+    });
+
+    socketRef.current = socket;
+  }, []);
+
+  // Update conversations list from a message:new event
+  const updateConversationFromMessage = (msg: any) => {
+    setOpenPhoneConversationsTest(prev => {
+      if (prev.status !== 'success' || !prev.data) return prev;
+      const conversations = [...(prev.data as any[])];
+
+      // Determine the participant phone (the external party, not our number)
+      const participantPhone = msg.direction === 'incoming' ? msg.fromNumber : msg.toNumber;
+
+      const idx = conversations.findIndex((c: any) =>
+        c.participantPhone === participantPhone
+      );
+
+      if (idx >= 0) {
+        // Move to top with updated info
+        const conv = { ...conversations[idx] };
+        conv.lastMessageAt = msg.createdAt;
+        conv.lastMessagePreview = msg.body || '(no text content)';
+        conv.lastMessageDirection = msg.direction;
+        conversations.splice(idx, 1);
+        conversations.unshift(conv);
+      } else {
+        // New conversation - add to top, keep max 10
+        conversations.unshift({
+          participantPhone,
+          phoneNumber: msg.direction === 'incoming' ? msg.toNumber : msg.fromNumber,
+          phoneNumberName: '',
+          lastMessageAt: msg.createdAt,
+          lastMessagePreview: msg.body || '(no text content)',
+          lastMessageDirection: msg.direction,
+          contactName: null,
+        });
+        if (conversations.length > 10) conversations.pop();
+      }
+
+      return {
+        ...prev,
+        message: `${conversations.length} conversations (live)`,
+        data: conversations,
+      };
+    });
+  };
+
+  // Update conversations list from a conversation:update event
+  const updateConversationFromWebhook = (data: any) => {
+    setOpenPhoneConversationsTest(prev => {
+      if (prev.status !== 'success' || !prev.data) return prev;
+      const conversations = [...(prev.data as any[])];
+
+      const idx = conversations.findIndex((c: any) =>
+        c.participantPhone === data.participantPhoneNumber
+      );
+
+      if (idx >= 0) {
+        const conv = { ...conversations[idx] };
+        conv.lastMessageAt = data.lastMessageAt || conv.lastMessageAt;
+        conv.lastMessagePreview = data.lastMessage || conv.lastMessagePreview;
+        if (data.contactName) conv.contactName = data.contactName;
+        if (data.phoneNumberName) conv.phoneNumberName = data.phoneNumberName;
+        conversations.splice(idx, 1);
+        conversations.unshift(conv);
+      }
+
+      return { ...prev, data: conversations };
+    });
+  };
+
+  // Add a new conversation from conversation:new event
+  const addNewConversation = (data: any) => {
+    setOpenPhoneConversationsTest(prev => {
+      if (prev.status !== 'success' || !prev.data) return prev;
+      const conversations = [...(prev.data as any[])];
+
+      // Don't add duplicates
+      const exists = conversations.some((c: any) =>
+        c.participantPhone === data.participantPhoneNumber
+      );
+      if (exists) return prev;
+
+      conversations.unshift({
+        participantPhone: data.participantPhoneNumber,
+        phoneNumber: data.phoneNumber,
+        phoneNumberName: data.phoneNumberName || '',
+        lastMessageAt: data.lastMessageAt,
+        lastMessagePreview: data.lastMessage || '(no text content)',
+        lastMessageDirection: 'incoming',
+        contactName: data.contactName || null,
+      });
+      if (conversations.length > 10) conversations.pop();
+
+      return {
+        ...prev,
+        message: `${conversations.length} conversations (live)`,
+        data: conversations,
+      };
+    });
+  };
+
+  // Cleanup socket on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+    };
+  }, []);
 
   // Connect OpenPhone
   const handleConnectOpenPhone = async (e: React.FormEvent) => {
@@ -116,6 +277,8 @@ export default function AdminIntegrationTestPage() {
         message: `Fetched ${conversations.length} conversations from OpenPhone (not stored in DB)`,
         data: conversations,
       });
+      // Ensure Socket.IO is connected for live updates
+      connectSocket();
     } catch (err: any) {
       setOpenPhoneConversationsTest({
         status: 'error',
@@ -182,6 +345,8 @@ export default function AdminIntegrationTestPage() {
     try {
       const integrations = await adminApi.getIntegrations();
       setIntegrationsData(integrations);
+      // Connect Socket.IO once we have the workspace ID
+      connectSocket();
     } catch (err: any) {
       console.error('Failed to load integrations:', err);
     }
@@ -490,18 +655,35 @@ export default function AdminIntegrationTestPage() {
                     <p className="text-sm text-gray-500">Fetch and display last 10 conversations from OpenPhone (not stored in DB)</p>
                   </div>
                 </div>
-                <button
-                  onClick={testOpenPhoneConversations}
-                  disabled={openPhoneConversationsTest.status === 'loading'}
-                  className="btn-primary flex items-center gap-2"
-                >
-                  {openPhoneConversationsTest.status === 'loading' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
+                <div className="flex items-center gap-3">
+                  {socketConnected && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Wifi className="h-3.5 w-3.5 text-green-500" />
+                      <span className="text-green-600 font-medium">Live</span>
+                      {lastSocketEvent && (
+                        <span className="text-gray-400 ml-1 max-w-[200px] truncate">{lastSocketEvent}</span>
+                      )}
+                    </div>
                   )}
-                  Fetch Conversations
-                </button>
+                  {!socketConnected && openPhoneConversationsTest.status === 'success' && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <WifiOff className="h-3.5 w-3.5 text-gray-400" />
+                      <span className="text-gray-400">Not connected</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={testOpenPhoneConversations}
+                    disabled={openPhoneConversationsTest.status === 'loading'}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    {openPhoneConversationsTest.status === 'loading' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Fetch Conversations
+                  </button>
+                </div>
               </div>
             </div>
 

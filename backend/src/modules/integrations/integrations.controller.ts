@@ -54,7 +54,7 @@ export class IntegrationsController {
   @Get('all')
   async getIntegrations(@WorkspaceId() workspaceId: string) {
     const integrations = await this.integrationsService.getIntegrations(workspaceId);
-    return { data: integrations };
+    return { data: integrations, workspaceId };
   }
 
   @Post()

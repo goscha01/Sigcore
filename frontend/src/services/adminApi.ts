@@ -20,6 +20,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 class AdminApiService {
   private client: AxiosInstance;
   private apiKey: string | null = null;
+  private workspaceId: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -173,8 +174,15 @@ class AdminApiService {
   // ==================== Integration Testing ====================
 
   async getIntegrations(): Promise<any> {
-    const response = await this.client.get<ApiResponse<any>>('/integrations/all');
+    const response = await this.client.get<{ data: any; workspaceId?: string }>('/integrations/all');
+    if (response.data.workspaceId) {
+      this.workspaceId = response.data.workspaceId;
+    }
     return response.data.data;
+  }
+
+  getWorkspaceId(): string | null {
+    return this.workspaceId;
   }
 
   async connectOpenPhone(apiKey: string): Promise<any> {
