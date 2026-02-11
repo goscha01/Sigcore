@@ -40,7 +40,7 @@ export class ApiKeysController {
       data: {
         apiKey: {
           ...result.apiKey,
-          key: `callio_${'*'.repeat(56)}${result.apiKey.key.slice(-8)}`,
+          key: `sc_${'*'.repeat(56)}${result.apiKey.key.slice(-8)}`,
         },
         // Full key is returned only once on creation
         fullKey: result.key,

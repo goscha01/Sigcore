@@ -20,7 +20,7 @@ export class ApiKeysService {
 
   async createApiKey(workspaceId: string, name: string): Promise<{ apiKey: ApiKey; key: string }> {
     // Generate a secure random API key
-    const key = `callio_${randomBytes(32).toString('hex')}`;
+    const key = `sc_${randomBytes(32).toString('hex')}`;
 
     const apiKey = this.apiKeyRepository.create({
       workspaceId,
@@ -68,7 +68,7 @@ export class ApiKeysService {
     tenantId: string,
     name: string,
   ): Promise<{ apiKey: ApiKey; key: string }> {
-    const key = `callio_tenant_${randomBytes(32).toString('hex')}`;
+    const key = `sc_tenant_${randomBytes(32).toString('hex')}`;
 
     const apiKey = this.apiKeyRepository.create({
       workspaceId,

@@ -1030,6 +1030,25 @@ export class CommunicationService {
 
     this.logger.log(`Starting sync for workspace ${workspaceId} with options: limit=${limit}, since=${since}, until=${until}, syncMessages=${syncMessages}, forceRefresh=${forceRefresh}, phoneNumberId=${phoneNumberId}, onlySavedContacts=${onlySavedContacts}`);
 
+    // Validate date filters
+    const now = new Date();
+    if (since && since > now) {
+      const futureDate = since.toISOString();
+      const currentDate = now.toISOString();
+      this.logger.error(`[SYNC VALIDATION] 'since' date is in the future: ${futureDate} (current time: ${currentDate})`);
+      throw new BadRequestException(
+        `Invalid sync date: The 'since' date (${futureDate.split('T')[0]}) is in the future. Please select a past date.`
+      );
+    }
+    if (until && until > now) {
+      const futureDate = until.toISOString();
+      const currentDate = now.toISOString();
+      this.logger.error(`[SYNC VALIDATION] 'until' date is in the future: ${futureDate} (current time: ${currentDate})`);
+      throw new BadRequestException(
+        `Invalid sync date: The 'until' date (${futureDate.split('T')[0]}) is in the future. Please select a past date.`
+      );
+    }
+
     const result: SyncResult = {
       conversationsFromProvider: 0,
       conversationsSynced: 0,
