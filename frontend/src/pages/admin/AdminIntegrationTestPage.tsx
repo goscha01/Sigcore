@@ -9,11 +9,11 @@ interface TestResult {
 }
 
 export default function AdminIntegrationTestPage() {
-  // Connection forms state
-  const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
-  const [twilioAccountSid, setTwilioAccountSid] = useState('');
-  const [twilioAuthToken, setTwilioAuthToken] = useState('');
-  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState('');
+  // Connection forms state - load from localStorage
+  const [openPhoneApiKey, setOpenPhoneApiKey] = useState(() => localStorage.getItem('test_openphone_api_key') || '');
+  const [twilioAccountSid, setTwilioAccountSid] = useState(() => localStorage.getItem('test_twilio_account_sid') || '');
+  const [twilioAuthToken, setTwilioAuthToken] = useState(() => localStorage.getItem('test_twilio_auth_token') || '');
+  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState(() => localStorage.getItem('test_twilio_phone_number') || '');
 
   // Connection status
   const [connectingOpenPhone, setConnectingOpenPhone] = useState(false);
@@ -22,6 +22,7 @@ export default function AdminIntegrationTestPage() {
 
   // Test results state
   const [openPhoneTest, setOpenPhoneTest] = useState<TestResult>({ status: 'idle' });
+  const [openPhoneConversationsTest, setOpenPhoneConversationsTest] = useState<TestResult>({ status: 'idle' });
   const [twilioTest, setTwilioTest] = useState<TestResult>({ status: 'idle' });
   const [provisioningTest, setProvisioningTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
@@ -33,6 +34,8 @@ export default function AdminIntegrationTestPage() {
     setConnectionResult({ status: 'loading' });
     try {
       const result = await adminApi.connectOpenPhone(openPhoneApiKey);
+      // Save to localStorage on successful connection
+      localStorage.setItem('test_openphone_api_key', openPhoneApiKey);
       setConnectionResult({
         status: 'success',
         message: 'OpenPhone connected successfully!',
@@ -60,6 +63,10 @@ export default function AdminIntegrationTestPage() {
         authToken: twilioAuthToken,
         phoneNumber: twilioPhoneNumber || undefined,
       });
+      // Save to localStorage on successful connection
+      localStorage.setItem('test_twilio_account_sid', twilioAccountSid);
+      localStorage.setItem('test_twilio_auth_token', twilioAuthToken);
+      localStorage.setItem('test_twilio_phone_number', twilioPhoneNumber);
       setConnectionResult({
         status: 'success',
         message: 'Twilio connected successfully!',
@@ -90,6 +97,24 @@ export default function AdminIntegrationTestPage() {
       setOpenPhoneTest({
         status: 'error',
         message: err.response?.data?.message || err.message || 'Failed to connect to OpenPhone',
+      });
+    }
+  };
+
+  // Test OpenPhone Conversations
+  const testOpenPhoneConversations = async () => {
+    setOpenPhoneConversationsTest({ status: 'loading' });
+    try {
+      const conversations = await adminApi.testOpenPhoneConversations(3);
+      setOpenPhoneConversationsTest({
+        status: 'success',
+        message: `Fetched ${conversations.length} conversations from OpenPhone (not stored in DB)`,
+        data: conversations,
+      });
+    } catch (err: any) {
+      setOpenPhoneConversationsTest({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to fetch OpenPhone conversations',
       });
     }
   };
@@ -432,6 +457,18 @@ export default function AdminIntegrationTestPage() {
             twilioTest,
             testTwilio,
             'bg-red-100 text-red-600'
+          )}
+        </div>
+
+        {/* OpenPhone Conversations Test */}
+        <div className="grid grid-cols-1 mt-6">
+          {renderTestCard(
+            'OpenPhone Last 3 Conversations',
+            'Fetch and display last 3 conversations from OpenPhone (not stored in DB)',
+            MessageSquare,
+            openPhoneConversationsTest,
+            testOpenPhoneConversations,
+            'bg-purple-100 text-purple-600'
           )}
         </div>
 

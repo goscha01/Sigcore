@@ -411,6 +411,22 @@ export class IntegrationsService {
     }));
   }
 
+  async testOpenPhoneConversations(workspaceId: string, limit: number = 3): Promise<any> {
+    const integration = await this.integrationRepo.findOne({
+      where: { workspaceId, provider: ProviderType.OPENPHONE },
+    });
+
+    if (!integration) {
+      throw new NotFoundException('OpenPhone integration not found');
+    }
+
+    const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
+    // Call the provider's getConversations method directly - it returns data without storing
+    const conversations = await this.openPhoneProvider.getConversations(credentials, limit);
+
+    return conversations;
+  }
+
   /**
    * Update Twilio phone number configuration.
    */

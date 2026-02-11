@@ -222,6 +222,11 @@ class AdminApiService {
     const response = await this.client.get<ApiResponse<any[]>>(`/tenants/phone-numbers/search?${queryParams.toString()}`);
     return response.data.data;
   }
+
+  async testOpenPhoneConversations(limit: number = 3): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>(`/integrations/openphone/test-conversations?limit=${limit}`);
+    return response.data.data;
+  }
 }
 
 export const adminApi = new AdminApiService();
