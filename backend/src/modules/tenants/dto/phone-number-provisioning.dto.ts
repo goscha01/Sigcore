@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsBoolean, IsNumber, IsEnum, Min, Max } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PricingType } from '../../../database/entities';
 
 export class SearchPhoneNumbersDto {
@@ -11,10 +12,12 @@ export class SearchPhoneNumbersDto {
 
   @IsBoolean()
   @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
   smsCapable?: boolean;
 
   @IsBoolean()
   @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
   voiceCapable?: boolean;
 }
 
