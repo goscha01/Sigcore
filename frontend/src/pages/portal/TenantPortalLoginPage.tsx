@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Key, AlertCircle } from 'lucide-react';
+import { Radio, Key, AlertCircle } from 'lucide-react';
 import { useTenantAuthStore } from '../../store/tenantAuthStore';
 
 export default function TenantPortalLoginPage() {
@@ -36,8 +36,9 @@ export default function TenantPortalLoginPage() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-4">
-            <img src="/logo.png" alt="Sigcore" className="h-14 w-auto" />
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Radio className="h-10 w-10 text-primary-600" />
+            <span className="text-2xl font-bold text-gray-900">Sigcore</span>
           </div>
           <h1 className="text-xl font-semibold text-gray-900">Tenant Portal</h1>
           <p className="text-sm text-gray-500 mt-1">
