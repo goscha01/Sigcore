@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 
 interface TestResult {
@@ -9,10 +9,72 @@ interface TestResult {
 }
 
 export default function AdminIntegrationTestPage() {
+  // Connection forms state
+  const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
+  const [twilioAccountSid, setTwilioAccountSid] = useState('');
+  const [twilioAuthToken, setTwilioAuthToken] = useState('');
+  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState('');
+
+  // Connection status
+  const [connectingOpenPhone, setConnectingOpenPhone] = useState(false);
+  const [connectingTwilio, setConnectingTwilio] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<TestResult>({ status: 'idle' });
+
+  // Test results state
   const [openPhoneTest, setOpenPhoneTest] = useState<TestResult>({ status: 'idle' });
   const [twilioTest, setTwilioTest] = useState<TestResult>({ status: 'idle' });
   const [syncTest, setSyncTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
+
+  // Connect OpenPhone
+  const handleConnectOpenPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConnectingOpenPhone(true);
+    setConnectionResult({ status: 'loading' });
+    try {
+      const result = await adminApi.connectOpenPhone(openPhoneApiKey);
+      setConnectionResult({
+        status: 'success',
+        message: 'OpenPhone connected successfully!',
+        data: result,
+      });
+      loadIntegrations();
+    } catch (err: any) {
+      setConnectionResult({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to connect OpenPhone',
+      });
+    } finally {
+      setConnectingOpenPhone(false);
+    }
+  };
+
+  // Connect Twilio
+  const handleConnectTwilio = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConnectingTwilio(true);
+    setConnectionResult({ status: 'loading' });
+    try {
+      const result = await adminApi.setupTwilio({
+        accountSid: twilioAccountSid,
+        authToken: twilioAuthToken,
+        phoneNumber: twilioPhoneNumber || undefined,
+      });
+      setConnectionResult({
+        status: 'success',
+        message: 'Twilio connected successfully!',
+        data: result,
+      });
+      loadIntegrations();
+    } catch (err: any) {
+      setConnectionResult({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to connect Twilio',
+      });
+    } finally {
+      setConnectingTwilio(false);
+    }
+  };
 
   // Test OpenPhone Connection
   const testOpenPhone = async () => {
@@ -54,13 +116,8 @@ export default function AdminIntegrationTestPage() {
   const testPhonePropagation = async () => {
     setSyncTest({ status: 'loading' });
     try {
-      // First, get Twilio numbers
       const twilioNumbers = await adminApi.getTwilioPhoneNumbers();
-
-      // Then trigger a sync
       const syncResult = await adminApi.startSync({ provider: 'twilio', limit: 10 });
-
-      // Get sync status
       const status = await adminApi.getSyncStatus();
 
       setSyncTest({
@@ -167,7 +224,7 @@ export default function AdminIntegrationTestPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Integration Tests</h1>
-          <p className="text-sm text-gray-500">Test OpenPhone, Twilio, and phone propagation</p>
+          <p className="text-sm text-gray-500">Connect and test OpenPhone, Twilio integrations</p>
         </div>
         <button
           onClick={loadIntegrations}
@@ -187,59 +244,226 @@ export default function AdminIntegrationTestPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {renderTestCard(
-          'OpenPhone Connection',
-          'Test connection to OpenPhone and fetch phone numbers',
-          Phone,
-          openPhoneTest,
-          testOpenPhone,
-          'bg-purple-100 text-purple-600'
-        )}
+      {connectionResult.status !== 'idle' && connectionResult.status !== 'loading' && (
+        <div className={`card p-5 ${
+          connectionResult.status === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+        }`}>
+          <div className="flex items-start gap-3">
+            {connectionResult.status === 'success' ? (
+              <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className={`text-sm font-medium ${
+                connectionResult.status === 'success' ? 'text-green-800' : 'text-red-800'
+              }`}>
+                {connectionResult.message}
+              </p>
+              {connectionResult.data && (
+                <details className="mt-2">
+                  <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-900">
+                    View Details
+                  </summary>
+                  <pre className="mt-2 text-xs bg-white p-3 rounded border border-gray-200 overflow-auto max-h-48">
+                    {JSON.stringify(connectionResult.data, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
-        {renderTestCard(
-          'Twilio Connection',
-          'Test connection to Twilio and fetch phone numbers',
-          MessageSquare,
-          twilioTest,
-          testTwilio,
-          'bg-red-100 text-red-600'
-        )}
+      {/* Connection Forms */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* OpenPhone Connection */}
+        <div className="card">
+          <div className="p-5 border-b border-gray-200 bg-purple-50">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-purple-100 text-purple-600">
+                <Plug className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Connect OpenPhone</h3>
+                <p className="text-sm text-gray-500">Setup OpenPhone integration</p>
+              </div>
+            </div>
+          </div>
+          <form onSubmit={handleConnectOpenPhone} className="p-5 space-y-4">
+            <div>
+              <label htmlFor="openphone-api-key" className="block text-sm font-medium text-gray-700 mb-1">
+                OpenPhone API Key
+              </label>
+              <input
+                id="openphone-api-key"
+                type="password"
+                value={openPhoneApiKey}
+                onChange={(e) => setOpenPhoneApiKey(e.target.value)}
+                placeholder="Enter your OpenPhone API key"
+                className="input w-full"
+                required
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Get your API key from OpenPhone dashboard
+              </p>
+            </div>
+            <button
+              type="submit"
+              disabled={connectingOpenPhone || !openPhoneApiKey}
+              className="btn-primary w-full flex items-center justify-center gap-2"
+            >
+              {connectingOpenPhone ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Plug className="h-4 w-4" />
+                  Connect OpenPhone
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Twilio Connection */}
+        <div className="card">
+          <div className="p-5 border-b border-gray-200 bg-red-50">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-100 text-red-600">
+                <Plug className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Connect Twilio</h3>
+                <p className="text-sm text-gray-500">Setup Twilio integration</p>
+              </div>
+            </div>
+          </div>
+          <form onSubmit={handleConnectTwilio} className="p-5 space-y-4">
+            <div>
+              <label htmlFor="twilio-account-sid" className="block text-sm font-medium text-gray-700 mb-1">
+                Account SID
+              </label>
+              <input
+                id="twilio-account-sid"
+                type="text"
+                value={twilioAccountSid}
+                onChange={(e) => setTwilioAccountSid(e.target.value)}
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className="input w-full"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="twilio-auth-token" className="block text-sm font-medium text-gray-700 mb-1">
+                Auth Token
+              </label>
+              <input
+                id="twilio-auth-token"
+                type="password"
+                value={twilioAuthToken}
+                onChange={(e) => setTwilioAuthToken(e.target.value)}
+                placeholder="Enter your Twilio Auth Token"
+                className="input w-full"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="twilio-phone" className="block text-sm font-medium text-gray-700 mb-1">
+                Phone Number (Optional)
+              </label>
+              <input
+                id="twilio-phone"
+                type="text"
+                value={twilioPhoneNumber}
+                onChange={(e) => setTwilioPhoneNumber(e.target.value)}
+                placeholder="+1234567890"
+                className="input w-full"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                E.164 format (e.g., +1234567890)
+              </p>
+            </div>
+            <button
+              type="submit"
+              disabled={connectingTwilio || !twilioAccountSid || !twilioAuthToken}
+              className="btn-primary w-full flex items-center justify-center gap-2"
+            >
+              {connectingTwilio ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Plug className="h-4 w-4" />
+                  Connect Twilio
+                </>
+              )}
+            </button>
+          </form>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1">
-        {renderTestCard(
-          'Phone Propagation from Twilio',
-          'Test fetching Twilio numbers and syncing them to the system',
-          RefreshCw,
-          syncTest,
-          testPhonePropagation,
-          'bg-blue-100 text-blue-600'
-        )}
+      {/* Test Cards */}
+      <div className="border-t border-gray-200 pt-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Test Integrations</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {renderTestCard(
+            'OpenPhone Connection',
+            'Test connection to OpenPhone and fetch phone numbers',
+            Phone,
+            openPhoneTest,
+            testOpenPhone,
+            'bg-purple-100 text-purple-600'
+          )}
+
+          {renderTestCard(
+            'Twilio Connection',
+            'Test connection to Twilio and fetch phone numbers',
+            MessageSquare,
+            twilioTest,
+            testTwilio,
+            'bg-red-100 text-red-600'
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 mt-6">
+          {renderTestCard(
+            'Phone Propagation from Twilio',
+            'Test fetching Twilio numbers and syncing them to the system',
+            RefreshCw,
+            syncTest,
+            testPhonePropagation,
+            'bg-blue-100 text-blue-600'
+          )}
+        </div>
       </div>
 
       <div className="card p-5 bg-gray-50">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Test Instructions</h3>
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">Instructions</h3>
         <ul className="space-y-2 text-sm text-gray-600">
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">1.</span>
-            <span>Make sure you have configured integrations with valid OpenPhone and Twilio credentials in the workspace settings.</span>
+            <span>Connect OpenPhone by entering your API key from the OpenPhone dashboard.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">2.</span>
-            <span>Test OpenPhone connection to verify API key is valid and fetch available phone numbers.</span>
+            <span>Connect Twilio by entering your Account SID and Auth Token from Twilio console.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">3.</span>
-            <span>Test Twilio connection to verify Account SID and Auth Token are correct and fetch phone numbers.</span>
+            <span>After connecting, test each integration to verify the connection and fetch phone numbers.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">4.</span>
-            <span>Test phone propagation to verify that Twilio numbers can be synced and used in the system.</span>
+            <span>Test phone propagation to verify that Twilio numbers can be synced to the system.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">5.</span>
-            <span>Click "Load Integrations" to see all configured integrations in the workspace.</span>
+            <span>Click "Load Integrations" to see all configured integrations.</span>
           </li>
         </ul>
       </div>

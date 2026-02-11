@@ -177,6 +177,22 @@ class AdminApiService {
     return response.data.data;
   }
 
+  async connectOpenPhone(apiKey: string): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>('/integrations/openphone/connect', { apiKey });
+    return response.data.data;
+  }
+
+  async setupTwilio(data: {
+    accountSid: string;
+    authToken: string;
+    phoneNumber?: string;
+    phoneNumberSid?: string;
+    friendlyName?: string;
+  }): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>('/integrations/twilio', data);
+    return response.data.data;
+  }
+
   async getOpenPhoneNumbers(): Promise<any[]> {
     const response = await this.client.get<ApiResponse<any[]>>('/integrations/openphone/numbers');
     return response.data.data;
