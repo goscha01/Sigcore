@@ -169,6 +169,33 @@ class AdminApiService {
     const response = await this.client.patch<{ data: WorkspaceApiKey }>(`/api-keys/${keyId}/toggle`);
     return response.data.data;
   }
+
+  // ==================== Integration Testing ====================
+
+  async getIntegrations(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/integrations/all');
+    return response.data.data;
+  }
+
+  async getOpenPhoneNumbers(): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>('/integrations/openphone/numbers');
+    return response.data.data;
+  }
+
+  async getTwilioPhoneNumbers(): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>('/integrations/twilio/phone-numbers');
+    return response.data.data;
+  }
+
+  async startSync(options?: { provider?: string; limit?: number }): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>('/integrations/sync', options);
+    return response.data.data;
+  }
+
+  async getSyncStatus(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/integrations/sync/status');
+    return response.data.data;
+  }
 }
 
 export const adminApi = new AdminApiService();

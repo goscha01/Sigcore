@@ -9,6 +9,7 @@ import AdminTenantsPage from './pages/admin/AdminTenantsPage';
 import AdminPricingPage from './pages/admin/AdminPricingPage';
 import AdminOrdersPage from './pages/admin/AdminOrdersPage';
 import AdminApiKeysPage from './pages/admin/AdminApiKeysPage';
+import AdminIntegrationTestPage from './pages/admin/AdminIntegrationTestPage';
 
 // Portal
 import TenantPortalLoginPage from './pages/portal/TenantPortalLoginPage';
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="pricing" element={<AdminPricingPage />} />
         <Route path="orders" element={<AdminOrdersPage />} />
         <Route path="api-keys" element={<AdminApiKeysPage />} />
+        <Route path="test-integrations" element={<AdminIntegrationTestPage />} />
       </Route>
 
       {/* Portal */}
