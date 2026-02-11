@@ -614,7 +614,90 @@ export class OpenPhoneProvider implements CommunicationProvider {
   }
 
   /**
+   * Get the most recent conversations by querying the /messages endpoint directly.
+   * This avoids the stale lastActivityAt issue with the /conversations endpoint.
+   * Returns raw conversation summaries with participant info and last message time.
+   */
+  async getRecentConversationsByMessages(credentialsString: string, limit: number = 3): Promise<Array<{
+    participantPhone: string;
+    phoneNumberId: string;
+    phoneNumber: string;
+    phoneNumberName: string;
+    lastMessageAt: Date;
+    lastMessagePreview: string;
+    lastMessageDirection: string;
+  }>> {
+    const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
+    const client = this.createClient(credentials.apiKey);
+
+    // Get all phone numbers for this workspace
+    const phoneNumberMap = await this.getPhoneNumbers(client);
+
+    // For each phone number, fetch recent messages
+    const conversationMap = new Map<string, {
+      participantPhone: string;
+      phoneNumberId: string;
+      phoneNumber: string;
+      phoneNumberName: string;
+      lastMessageAt: Date;
+      lastMessagePreview: string;
+      lastMessageDirection: string;
+    }>();
+
+    for (const [phoneNumberId, phoneInfo] of phoneNumberMap) {
+      try {
+        // Fetch most recent messages for this phone number (already sorted by most recent)
+        const response = await client.get('/messages', {
+          params: { phoneNumberId, maxResults: 50 },
+        });
+        const messages = response.data.data || [];
+        this.logger.log(`Fetched ${messages.length} recent messages for phone ${phoneInfo.number}`);
+
+        for (const msg of messages) {
+          const direction = msg.direction as string;
+          const from = msg.from as string;
+          const to = (msg.to as string[])?.[0] || msg.to as string;
+          const participant = direction === 'incoming' ? from : to;
+
+          if (!participant) continue;
+
+          // Use participant+phoneNumberId as key to handle same contact across different lines
+          const key = `${participant}_${phoneNumberId}`;
+          const msgDate = new Date(msg.createdAt as string);
+
+          if (!conversationMap.has(key) || msgDate > conversationMap.get(key)!.lastMessageAt) {
+            conversationMap.set(key, {
+              participantPhone: participant,
+              phoneNumberId,
+              phoneNumber: phoneInfo.number,
+              phoneNumberName: phoneInfo.name || '',
+              lastMessageAt: msgDate,
+              lastMessagePreview: (msg.content as string || msg.text as string || '').substring(0, 100),
+              lastMessageDirection: direction,
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch messages for phone ${phoneNumberId}: ${error}`);
+      }
+    }
+
+    // Sort by most recent message and return top N
+    const sorted = Array.from(conversationMap.values())
+      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
+      .slice(0, limit);
+
+    this.logger.log(`Found ${conversationMap.size} unique conversations, returning top ${sorted.length}`);
+    for (const conv of sorted) {
+      this.logger.log(`  Recent: ${conv.participantPhone} | ${conv.lastMessageAt.toISOString()} | ${conv.lastMessageDirection} | "${conv.lastMessagePreview.substring(0, 40)}..."`);
+    }
+
+    return sorted;
+  }
+
+  /**
    * Look up contact names for a list of phone numbers.
+   * Fetches ALL contacts to ensure no names are missed.
    * Returns a map of phone number -> contact name.
    */
   async lookupContactNamesByPhone(credentialsString: string, phoneNumbers: string[]): Promise<Map<string, string>> {
@@ -625,13 +708,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
       const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
       const client = this.createClient(credentials.apiKey);
 
-      // Fetch contacts (limited to avoid fetching thousands)
-      const params: Record<string, unknown> = { maxResults: 50 };
-      const response = await client.get('/contacts', { params });
-      const rawContacts = response.data.data || [];
-
-      // Build a lookup map: phone number -> contact name
-      for (const raw of rawContacts) {
+      // Helper to extract name and phone numbers from a raw contact
+      const processContact = (raw: Record<string, unknown>) => {
         const defaultFields = raw.defaultFields as Record<string, unknown> || {};
         const firstName = (defaultFields.firstName as string) || '';
         const lastName = (defaultFields.lastName as string) || '';
@@ -642,48 +720,53 @@ export class OpenPhoneProvider implements CommunicationProvider {
         if (contactPhones && name) {
           for (const cp of contactPhones) {
             if (cp.value) {
-              // Normalize: store both with and without + for matching
-              const normalized = cp.value.startsWith('+') ? cp.value : '+' + cp.value;
-              result.set(normalized, name);
-              result.set(cp.value, name);
+              // Normalize phone numbers for matching: strip all non-digit chars except +
+              const cleaned = cp.value.replace(/[^+\d]/g, '');
+              const withPlus = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
+              const withoutPlus = withPlus.substring(1);
+              result.set(withPlus, name);
+              result.set(withoutPlus, name);
+              result.set(cp.value, name); // Also store original format
             }
           }
         }
-      }
+      };
 
-      // If we didn't find all numbers in the first page, try additional pages
-      // But only if we're still missing lookups
-      const missing = phoneNumbers.filter(pn => !result.has(pn));
-      if (missing.length > 0 && response.data.nextPageToken) {
-        let pageToken = response.data.nextPageToken;
-        let pages = 0;
-        while (pageToken && pages < 10 && missing.some(pn => !result.has(pn))) {
-          const nextResponse = await client.get('/contacts', { params: { maxResults: 50, pageToken } });
-          const nextContacts = nextResponse.data.data || [];
-          for (const raw of nextContacts) {
-            const defaultFields = raw.defaultFields as Record<string, unknown> || {};
-            const firstName = (defaultFields.firstName as string) || '';
-            const lastName = (defaultFields.lastName as string) || '';
-            const company = (defaultFields.company as string) || '';
-            const name = [firstName, lastName].filter(Boolean).join(' ') || company || '';
+      // Fetch ALL contacts with pagination until we find all numbers we need
+      let pageToken: string | null = null;
+      let pageCount = 0;
+      const maxPages = 100; // Safety limit
 
-            const contactPhones = defaultFields.phoneNumbers as Array<{ value: string }> | undefined;
-            if (contactPhones && name) {
-              for (const cp of contactPhones) {
-                if (cp.value) {
-                  const normalized = cp.value.startsWith('+') ? cp.value : '+' + cp.value;
-                  result.set(normalized, name);
-                  result.set(cp.value, name);
-                }
-              }
-            }
-          }
-          pageToken = nextResponse.data.nextPageToken;
-          pages++;
+      do {
+        const params: Record<string, unknown> = { maxResults: 50 };
+        if (pageToken) params.pageToken = pageToken;
+
+        const response = await client.get('/contacts', { params });
+        const rawContacts = response.data.data || [];
+
+        for (const raw of rawContacts) {
+          processContact(raw);
         }
-      }
 
-      this.logger.log(`Contact lookup: found ${result.size / 2} names for ${phoneNumbers.length} phone numbers`);
+        pageToken = response.data.nextPageToken || null;
+        pageCount++;
+
+        // Check if we've found all the numbers we need
+        const allFound = phoneNumbers.every(pn => result.has(pn));
+        if (allFound) {
+          this.logger.log(`Found all ${phoneNumbers.length} contact names after ${pageCount} pages`);
+          break;
+        }
+      } while (pageToken && pageCount < maxPages);
+
+      const foundCount = phoneNumbers.filter(pn => result.has(pn)).length;
+      this.logger.log(`Contact lookup: found ${foundCount}/${phoneNumbers.length} names after ${pageCount} pages`);
+
+      // Log which numbers were NOT found for debugging
+      const notFound = phoneNumbers.filter(pn => !result.has(pn));
+      if (notFound.length > 0) {
+        this.logger.warn(`Contact names NOT found for: ${notFound.join(', ')}`);
+      }
     } catch (error: unknown) {
       const axiosError = error as { message?: string };
       this.logger.warn(`Failed to lookup contacts by phone: ${axiosError.message}`);

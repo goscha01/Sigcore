@@ -421,13 +421,13 @@ export class IntegrationsService {
     }
 
     const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
-    // Call the provider's getConversations method directly - it returns data without storing
-    const conversations = await this.openPhoneProvider.getConversations(credentials, limit);
+
+    // Use messages-based approach to get truly recent conversations
+    // The /conversations endpoint has stale lastActivityAt values
+    const conversations = await this.openPhoneProvider.getRecentConversationsByMessages(credentials, limit);
 
     // Look up contact names for participant phone numbers
-    const participantNumbers = conversations
-      .map((c: any) => c.participantPhoneNumber)
-      .filter(Boolean);
+    const participantNumbers = conversations.map(c => c.participantPhone).filter(Boolean);
 
     const contactNames = await this.openPhoneProvider.lookupContactNamesByPhone(
       credentials,
@@ -435,9 +435,9 @@ export class IntegrationsService {
     );
 
     // Enrich conversations with contact names
-    return conversations.map((conv: any) => ({
+    return conversations.map(conv => ({
       ...conv,
-      contactName: contactNames.get(conv.participantPhoneNumber) || null,
+      contactName: contactNames.get(conv.participantPhone) || null,
     }));
   }
 
