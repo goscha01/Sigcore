@@ -596,21 +596,34 @@ export class OpenPhoneProvider implements CommunicationProvider {
     // Get all phone numbers for this workspace
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Step 1: Fetch conversations from /conversations endpoint to get participants
-    const candidateLimit = Math.max(limit * 10, 30);
+    // Step 1: Fetch ALL conversations from /conversations endpoint (paginate through all pages)
+    // We need all conversations because OpenPhone's lastActivityAt is stale -
+    // a conversation started 3 months ago with a message from today might have
+    // an old lastActivityAt and would be missed if we only fetch the first page.
     const allConversations: Array<Record<string, unknown>> = [];
 
     for (const [phoneNumberId] of phoneNumberMap) {
+      let pageToken: string | null = null;
+      let pageCount = 0;
+      const maxPages = 50; // Safety limit: 50 pages × 100 = 5,000 conversations max per phone
+
       try {
-        const response = await client.get('/conversations', {
-          params: { phoneNumbers: [phoneNumberId], maxResults: candidateLimit },
-        });
-        const conversations = response.data.data || [];
-        for (const conv of conversations) {
-          conv._phoneNumberId = phoneNumberId;
-        }
-        allConversations.push(...conversations);
-        this.logger.log(`Fetched ${conversations.length} conversations for phone ${phoneNumberId}`);
+        do {
+          const params: Record<string, unknown> = { phoneNumbers: [phoneNumberId], maxResults: 100 };
+          if (pageToken) params.pageToken = pageToken;
+
+          const response = await client.get('/conversations', { params });
+          const conversations = response.data.data || [];
+          for (const conv of conversations) {
+            conv._phoneNumberId = phoneNumberId;
+          }
+          allConversations.push(...conversations);
+
+          pageToken = response.data.nextPageToken || null;
+          pageCount++;
+        } while (pageToken && pageCount < maxPages);
+
+        this.logger.log(`Fetched ${allConversations.length} conversations for phone ${phoneNumberId} (${pageCount} pages)`);
       } catch (error: any) {
         this.logger.warn(`Failed to fetch conversations for phone ${phoneNumberId}: ${error.message}`);
       }
@@ -621,13 +634,18 @@ export class OpenPhoneProvider implements CommunicationProvider {
       return [];
     }
 
-    // Sort by lastActivityAt descending to get top candidates
+    this.logger.log(`Total conversations fetched: ${allConversations.length}`);
+
+    // Sort by lastActivityAt descending as a rough guide for candidate selection
     allConversations.sort((a, b) => {
       const aTime = a.lastActivityAt ? new Date(a.lastActivityAt as string).getTime() : 0;
       const bTime = b.lastActivityAt ? new Date(b.lastActivityAt as string).getTime() : 0;
       return bTime - aTime;
     });
 
+    // Verify top candidates with /messages to get actual last message timestamps
+    // Check more candidates than needed since lastActivityAt ordering is unreliable
+    const candidateLimit = Math.min(allConversations.length, Math.max(limit * 10, 50));
     const candidates = allConversations.slice(0, candidateLimit);
     this.logger.log(`Processing ${candidates.length} candidate conversations to find top ${limit} by actual message time`);
 
