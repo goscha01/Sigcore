@@ -208,10 +208,13 @@ export class OpenPhoneProvider implements CommunicationProvider {
       let pageCount = 0;
       const maxPages = 200; // Increased limit: 200 pages × 100 = 20,000 conversations max
 
-      // Note: We always fetch ALL conversations first, then sort by lastActivityAt and apply limit.
-      // This ensures we get the most recent conversations regardless of API return order.
+      // When a small limit is set (e.g. for testing), optimize by requesting only what we need
+      // and stopping pagination early. The API returns conversations in recent-first order.
+      const hasSmallLimit = limit && limit <= 100;
+      const effectiveMaxResults = hasSmallLimit ? limit : 100;
+
       do {
-        const params: Record<string, unknown> = { maxResults: 100 };
+        const params: Record<string, unknown> = { maxResults: effectiveMaxResults };
         if (pageToken) {
           params.pageToken = pageToken;
         }
@@ -231,6 +234,12 @@ export class OpenPhoneProvider implements CommunicationProvider {
         // Log every 10 pages to reduce noise
         if (pageCount % 10 === 0 || !pageToken) {
           this.logger.log(`Page ${pageCount}: fetched ${conversations.length} conversations (total: ${allConversations.length})`);
+        }
+
+        // Stop early if we have a limit and enough conversations
+        if (limit && allConversations.length >= limit) {
+          this.logger.log(`Reached requested limit of ${limit}, stopping pagination at ${allConversations.length} conversations`);
+          break;
         }
       } while (pageToken && pageCount < maxPages);
 
@@ -254,7 +263,10 @@ export class OpenPhoneProvider implements CommunicationProvider {
         this.logger.log(`  Conversation: id=${conv.id} | lastActivity=${conv.lastActivityAt} | participants=${JSON.stringify(participants)} | name=${conv.name || '(none)'}`);
       }
 
-      return allConversations.map((conv: Record<string, unknown>) => {
+      // Apply limit after sorting to return only the requested number
+      const limitedConversations = limit ? allConversations.slice(0, limit) : allConversations;
+
+      return limitedConversations.map((conv: Record<string, unknown>) => {
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
         const participants = (conv.participants as string[]) || [];
