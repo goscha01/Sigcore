@@ -213,13 +213,14 @@ class AdminApiService {
     return response.data.data;
   }
 
-  async getConversations(params?: { provider?: string; limit?: number }): Promise<any> {
-    const queryParams = new URLSearchParams();
-    if (params?.provider) queryParams.append('provider', params.provider);
-    if (params?.limit) queryParams.append('limit', params.limit.toString());
+  async searchAvailablePhoneNumbers(country: string = 'US', areaCode?: string): Promise<any[]> {
+    const queryParams = new URLSearchParams({ country });
+    if (areaCode) queryParams.append('areaCode', areaCode);
+    queryParams.append('smsCapable', 'true');
+    queryParams.append('voiceCapable', 'true');
 
-    const response = await this.client.get<any>(`/v1/conversations?${queryParams.toString()}`);
-    return response.data;
+    const response = await this.client.get<ApiResponse<any[]>>(`/tenants/phone-numbers/search?${queryParams.toString()}`);
+    return response.data.data;
   }
 }
 

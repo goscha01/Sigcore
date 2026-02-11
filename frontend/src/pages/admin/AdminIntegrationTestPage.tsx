@@ -22,9 +22,8 @@ export default function AdminIntegrationTestPage() {
 
   // Test results state
   const [openPhoneTest, setOpenPhoneTest] = useState<TestResult>({ status: 'idle' });
-  const [openPhoneConversationsTest, setOpenPhoneConversationsTest] = useState<TestResult>({ status: 'idle' });
   const [twilioTest, setTwilioTest] = useState<TestResult>({ status: 'idle' });
-  const [syncTest, setSyncTest] = useState<TestResult>({ status: 'idle' });
+  const [provisioningTest, setProvisioningTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
 
   // Connect OpenPhone
@@ -95,21 +94,25 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
-  // Test OpenPhone Conversations
-  const testOpenPhoneConversations = async () => {
-    setOpenPhoneConversationsTest({ status: 'loading' });
+  // Test Phone Number Provisioning
+  const testPhoneProvisioning = async () => {
+    setProvisioningTest({ status: 'loading' });
     try {
-      const result = await adminApi.getConversations({ provider: 'openphone', limit: 3 });
-      const conversations = result.data || [];
-      setOpenPhoneConversationsTest({
+      // Search for available phone numbers from Twilio
+      const availableNumbers = await adminApi.searchAvailablePhoneNumbers('US');
+
+      setProvisioningTest({
         status: 'success',
-        message: `Found ${conversations.length} recent conversations from OpenPhone`,
-        data: { conversations, meta: result.meta },
+        message: `Phone propagation test successful! Found ${availableNumbers.length} available phone numbers from Twilio that can be provisioned.`,
+        data: {
+          availableNumbers: availableNumbers.slice(0, 5), // Show first 5
+          totalAvailable: availableNumbers.length,
+        },
       });
     } catch (err: any) {
-      setOpenPhoneConversationsTest({
+      setProvisioningTest({
         status: 'error',
-        message: err.response?.data?.message || err.message || 'Failed to fetch OpenPhone conversations',
+        message: err.response?.data?.message || err.message || 'Failed to test phone number provisioning',
       });
     }
   };
@@ -132,42 +135,6 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
-  // Test Phone Propagation from Twilio
-  const testPhonePropagation = async () => {
-    setSyncTest({ status: 'loading' });
-    try {
-      // Step 1: Fetch Twilio phone numbers
-      const twilioNumbers = await adminApi.getTwilioPhoneNumbers();
-
-      // Step 2: Trigger sync to propagate conversations/messages into the system
-      const syncResult = await adminApi.startSync({ provider: 'twilio', limit: 10 });
-
-      // Step 3: Wait a bit for sync to process
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Step 4: Check sync status
-      const status = await adminApi.getSyncStatus();
-
-      // Step 5: Fetch conversations to see if they were propagated
-      const conversations = await adminApi.getConversations({ provider: 'twilio', limit: 5 });
-
-      setSyncTest({
-        status: 'success',
-        message: `Phone propagation test complete! Found ${twilioNumbers.length} Twilio numbers, synced ${conversations.data?.length || 0} conversations into the system.`,
-        data: {
-          twilioNumbers: twilioNumbers.slice(0, 3), // Show first 3 numbers
-          syncResult,
-          syncStatus: status,
-          propagatedConversations: conversations.data || [],
-        },
-      });
-    } catch (err: any) {
-      setSyncTest({
-        status: 'error',
-        message: err.response?.data?.message || err.message || 'Failed to test phone propagation',
-      });
-    }
-  };
 
   // Load All Integrations
   const loadIntegrations = async () => {
@@ -468,26 +435,14 @@ export default function AdminIntegrationTestPage() {
           )}
         </div>
 
-        {/* OpenPhone Conversations Test */}
-        <div className="grid grid-cols-1 mt-6">
-          {renderTestCard(
-            'OpenPhone Last 3 Conversations',
-            'Fetch the 3 most recent conversations from OpenPhone',
-            MessageSquare,
-            openPhoneConversationsTest,
-            testOpenPhoneConversations,
-            'bg-purple-100 text-purple-600'
-          )}
-        </div>
-
         {/* Propagation Test */}
         <div className="grid grid-cols-1 mt-6">
           {renderTestCard(
-            'Phone Propagation from Twilio',
-            'Test syncing Twilio conversations into the system database',
+            'Phone Number Provisioning from Twilio',
+            'Search available Twilio phone numbers that can be purchased/provisioned',
             RefreshCw,
-            syncTest,
-            testPhonePropagation,
+            provisioningTest,
+            testPhoneProvisioning,
             'bg-blue-100 text-blue-600'
           )}
         </div>
@@ -510,24 +465,21 @@ export default function AdminIntegrationTestPage() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">4.</span>
-            <span>Test OpenPhone conversations to see the 3 most recent conversations.</span>
+            <span><strong>Test Phone Number Provisioning:</strong> This searches for available phone numbers from Twilio that can be purchased and assigned to users/tenants.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">5.</span>
-            <span><strong>Test Phone Propagation:</strong> This will sync Twilio conversations and messages into your system's database. The test shows: (a) Twilio phone numbers, (b) sync status, (c) conversations now stored in your database.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary-600 font-bold">6.</span>
             <span>Click "Load Integrations" to see all configured integrations.</span>
           </li>
         </ul>
 
         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <h4 className="text-xs font-semibold text-blue-900 mb-1">What is Propagation?</h4>
+          <h4 className="text-xs font-semibold text-blue-900 mb-1">What is Phone Number Provisioning/Propagation?</h4>
           <p className="text-xs text-blue-800">
-            Propagation means syncing data from Twilio/OpenPhone into your Sigcore database. When you click "Test Phone Propagation",
-            the system will fetch conversations and messages from Twilio and save them locally. This allows you to query, search,
-            and analyze the data without making repeated API calls to Twilio.
+            Phone number provisioning (propagation) is the process of purchasing phone numbers from Twilio and assigning them to your tenants/users.
+            When you click "Test Phone Number Provisioning", the system searches for available phone numbers from Twilio's inventory that can be
+            purchased. These numbers can then be assigned to tenants, allowing them to send/receive SMS and calls through your platform.
+            The test shows available numbers with pricing information (Twilio cost + your markup).
           </p>
         </div>
       </div>
