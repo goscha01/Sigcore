@@ -208,13 +208,11 @@ export class OpenPhoneProvider implements CommunicationProvider {
       let pageCount = 0;
       const maxPages = 200; // Increased limit: 200 pages × 100 = 20,000 conversations max
 
-      // When a small limit is set (e.g. for testing), optimize by requesting only what we need
-      // and stopping pagination early. The API returns conversations in recent-first order.
-      const hasSmallLimit = limit && limit <= 100;
-      const effectiveMaxResults = hasSmallLimit ? limit : 100;
-
+      // Always fetch full pages (100) since the API does not sort by lastActivityAt.
+      // We need a full page to sort and find the truly most recent conversations.
+      // When a limit is set, stop pagination after the first page (100 is enough to find recent ones).
       do {
-        const params: Record<string, unknown> = { maxResults: effectiveMaxResults };
+        const params: Record<string, unknown> = { maxResults: 100 };
         if (pageToken) {
           params.pageToken = pageToken;
         }
@@ -236,9 +234,10 @@ export class OpenPhoneProvider implements CommunicationProvider {
           this.logger.log(`Page ${pageCount}: fetched ${conversations.length} conversations (total: ${allConversations.length})`);
         }
 
-        // Stop early if we have a limit and enough conversations
-        if (limit && allConversations.length >= limit) {
-          this.logger.log(`Reached requested limit of ${limit}, stopping pagination at ${allConversations.length} conversations`);
+        // When a small limit is set (e.g. 3 for testing), stop after first page
+        // since 100 conversations is enough to sort and find the most recent ones.
+        if (limit && limit <= 100 && allConversations.length >= 100) {
+          this.logger.log(`Small limit (${limit}) requested, stopping after first page of ${allConversations.length} conversations`);
           break;
         }
       } while (pageToken && pageCount < maxPages);
