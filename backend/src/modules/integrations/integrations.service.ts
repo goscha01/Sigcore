@@ -434,11 +434,15 @@ export class IntegrationsService {
       participantNumbers,
     );
 
-    // Enrich conversations with contact names
-    return conversations.map(conv => ({
-      ...conv,
-      contactName: contactNames.get(conv.participantPhone) || null,
-    }));
+    // Enrich conversations with contact names and log mappings for debugging
+    return conversations.map(conv => {
+      const contactName = contactNames.get(conv.participantPhone) || null;
+      this.logger.log(`Contact mapping: ${conv.participantPhone} -> "${contactName}"`);
+      return {
+        ...conv,
+        contactName,
+      };
+    });
   }
 
   /**

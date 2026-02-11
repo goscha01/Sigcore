@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search, ArrowUpRight, ArrowDownLeft, User } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 
 interface TestResult {
@@ -478,14 +478,101 @@ export default function AdminIntegrationTestPage() {
 
         {/* OpenPhone Conversations Test */}
         <div className="grid grid-cols-1 mt-6">
-          {renderTestCard(
-            'OpenPhone Last 3 Conversations',
-            'Fetch and display last 3 conversations from OpenPhone (not stored in DB)',
-            MessageSquare,
-            openPhoneConversationsTest,
-            testOpenPhoneConversations,
-            'bg-purple-100 text-purple-600'
-          )}
+          <div className="card">
+            <div className="p-5 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-100 text-purple-600">
+                    <MessageSquare className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">OpenPhone Last 3 Conversations</h3>
+                    <p className="text-sm text-gray-500">Fetch and display last 3 conversations from OpenPhone (not stored in DB)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={testOpenPhoneConversations}
+                  disabled={openPhoneConversationsTest.status === 'loading'}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  {openPhoneConversationsTest.status === 'loading' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Fetch Conversations
+                </button>
+              </div>
+            </div>
+
+            {openPhoneConversationsTest.status === 'loading' && (
+              <div className="p-8 flex items-center justify-center text-gray-500">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Fetching conversations...
+              </div>
+            )}
+
+            {openPhoneConversationsTest.status === 'error' && (
+              <div className="p-5 bg-red-50">
+                <div className="flex items-start gap-3">
+                  <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-red-800">{openPhoneConversationsTest.message}</p>
+                </div>
+              </div>
+            )}
+
+            {openPhoneConversationsTest.status === 'success' && openPhoneConversationsTest.data && (
+              <div>
+                <div className="px-5 py-3 bg-green-50 border-b border-green-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <p className="text-sm font-medium text-green-800">{openPhoneConversationsTest.message}</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {(openPhoneConversationsTest.data as any[]).map((conv: any, idx: number) => (
+                    <div key={idx} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-full bg-gray-100 flex-shrink-0">
+                          <User className="h-4 w-4 text-gray-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-gray-900">
+                                {conv.contactName || conv.participantPhone}
+                              </span>
+                              {conv.contactName && (
+                                <span className="text-xs text-gray-500">{conv.participantPhone}</span>
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-400 flex-shrink-0">
+                              {new Date(conv.lastMessageAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            {conv.lastMessageDirection === 'outgoing' ? (
+                              <ArrowUpRight className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                            ) : conv.lastMessageDirection === 'incoming' ? (
+                              <ArrowDownLeft className="h-3 w-3 text-green-500 flex-shrink-0" />
+                            ) : null}
+                            <p className="text-sm text-gray-600 truncate">
+                              {conv.lastMessagePreview || '(no text content)'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3 mt-1.5">
+                            <span className="text-xs text-gray-400">
+                              via {conv.phoneNumberName || conv.phoneNumber}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Propagation Test */}

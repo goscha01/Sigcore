@@ -662,7 +662,15 @@ export class OpenPhoneProvider implements CommunicationProvider {
           const latestMsg = messages[0];
           const direction = latestMsg.direction as string;
           const msgDate = new Date(latestMsg.createdAt as string);
-          const preview = (latestMsg.content as string || latestMsg.text as string || '').substring(0, 100);
+          let preview = (latestMsg.content as string || latestMsg.text as string || '').substring(0, 100);
+          if (!preview) {
+            const media = latestMsg.media as Array<{ type?: string }> | undefined;
+            if (media && media.length > 0) {
+              preview = `[${media[0]?.type || 'Media'}]`;
+            } else if (latestMsg.type === 'call') {
+              preview = '[Call]';
+            }
+          }
 
           results.push({
             participantPhone: participants[0],
