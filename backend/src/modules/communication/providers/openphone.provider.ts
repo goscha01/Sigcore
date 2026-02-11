@@ -647,8 +647,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
     for (const [phoneNumberId, phoneInfo] of phoneNumberMap) {
       try {
         // Fetch most recent messages for this phone number (already sorted by most recent)
+        // Note: /messages endpoint uses 'limit' (not 'maxResults' like /conversations)
         const response = await client.get('/messages', {
-          params: { phoneNumberId, maxResults: 50 },
+          params: { phoneNumberId, limit: 50 },
         });
         const messages = response.data.data || [];
         this.logger.log(`Fetched ${messages.length} recent messages for phone ${phoneInfo.number}`);
@@ -677,8 +678,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
             });
           }
         }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch messages for phone ${phoneNumberId}: ${error}`);
+      } catch (error: any) {
+        const responseData = error?.response?.data ? JSON.stringify(error.response.data) : '';
+        this.logger.warn(`Failed to fetch messages for phone ${phoneNumberId}: ${error.message}${responseData ? ` - Response: ${responseData}` : ''}`);
       }
     }
 
