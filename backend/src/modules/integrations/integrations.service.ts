@@ -434,10 +434,10 @@ export class IntegrationsService {
       participantNumbers,
     );
 
-    // Enrich conversations with contact names and log mappings for debugging
+    // Enrich conversations with contact names (use conversation name as fallback)
     return conversations.map(conv => {
-      const contactName = contactNames.get(conv.participantPhone) || null;
-      this.logger.log(`Contact mapping: ${conv.participantPhone} -> "${contactName}"`);
+      const contactName = contactNames.get(conv.participantPhone) || conv.conversationName || null;
+      this.logger.log(`Contact mapping: ${conv.participantPhone} -> "${contactName}" (lookup: "${contactNames.get(conv.participantPhone) || 'none'}", convName: "${conv.conversationName || 'none'}")`);
       return {
         ...conv,
         contactName,

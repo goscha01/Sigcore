@@ -110,7 +110,7 @@ export default function AdminIntegrationTestPage() {
   const testOpenPhoneConversations = async () => {
     setOpenPhoneConversationsTest({ status: 'loading' });
     try {
-      const conversations = await adminApi.testOpenPhoneConversations(3);
+      const conversations = await adminApi.testOpenPhoneConversations(10);
       setOpenPhoneConversationsTest({
         status: 'success',
         message: `Fetched ${conversations.length} conversations from OpenPhone (not stored in DB)`,
@@ -486,8 +486,8 @@ export default function AdminIntegrationTestPage() {
                     <MessageSquare className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">OpenPhone Last 3 Conversations</h3>
-                    <p className="text-sm text-gray-500">Fetch and display last 3 conversations from OpenPhone (not stored in DB)</p>
+                    <h3 className="text-lg font-semibold text-gray-900">OpenPhone Recent Conversations</h3>
+                    <p className="text-sm text-gray-500">Fetch and display last 10 conversations from OpenPhone (not stored in DB)</p>
                   </div>
                 </div>
                 <button

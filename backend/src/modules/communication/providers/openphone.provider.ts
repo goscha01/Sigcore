@@ -588,6 +588,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
     lastMessageAt: Date;
     lastMessagePreview: string;
     lastMessageDirection: string;
+    conversationName?: string;
   }>> {
     const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
     const client = this.createClient(credentials.apiKey);
@@ -639,6 +640,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
       lastMessageAt: Date;
       lastMessagePreview: string;
       lastMessageDirection: string;
+      conversationName?: string;
     }> = [];
 
     for (const conv of candidates) {
@@ -662,13 +664,16 @@ export class OpenPhoneProvider implements CommunicationProvider {
           const latestMsg = messages[0];
           const direction = latestMsg.direction as string;
           const msgDate = new Date(latestMsg.createdAt as string);
-          let preview = (latestMsg.content as string || latestMsg.text as string || '').substring(0, 100);
+          let preview = (latestMsg.content as string || latestMsg.text as string || latestMsg.body as string || '').substring(0, 100);
           if (!preview) {
-            const media = latestMsg.media as Array<{ type?: string }> | undefined;
+            const media = latestMsg.media as Array<{ type?: string; url?: string }> | undefined;
             if (media && media.length > 0) {
               preview = `[${media[0]?.type || 'Media'}]`;
             } else if (latestMsg.type === 'call') {
               preview = '[Call]';
+            } else {
+              this.logger.log(`Empty message preview - raw msg keys: ${Object.keys(latestMsg).join(', ')}, type: ${latestMsg.type}, object: ${latestMsg.object}`);
+              preview = latestMsg.type ? `[${latestMsg.type}]` : '(no content)';
             }
           }
 
@@ -680,6 +685,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
             lastMessageAt: msgDate,
             lastMessagePreview: preview,
             lastMessageDirection: direction,
+            conversationName: conv.name as string | undefined,
           });
         }
       } catch (error: any) {
@@ -693,6 +699,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
           lastMessageAt: fallbackDate,
           lastMessagePreview: '(unable to fetch latest message)',
           lastMessageDirection: 'unknown',
+          conversationName: conv.name as string | undefined,
         });
         this.logger.warn(`Failed to fetch messages for conversation ${conv.id}: ${error.message}`);
       }
