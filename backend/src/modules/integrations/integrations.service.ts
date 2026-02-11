@@ -424,7 +424,21 @@ export class IntegrationsService {
     // Call the provider's getConversations method directly - it returns data without storing
     const conversations = await this.openPhoneProvider.getConversations(credentials, limit);
 
-    return conversations;
+    // Look up contact names for participant phone numbers
+    const participantNumbers = conversations
+      .map((c: any) => c.participantPhoneNumber)
+      .filter(Boolean);
+
+    const contactNames = await this.openPhoneProvider.lookupContactNamesByPhone(
+      credentials,
+      participantNumbers,
+    );
+
+    // Enrich conversations with contact names
+    return conversations.map((conv: any) => ({
+      ...conv,
+      contactName: contactNames.get(conv.participantPhoneNumber) || null,
+    }));
   }
 
   /**

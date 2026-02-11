@@ -614,6 +614,85 @@ export class OpenPhoneProvider implements CommunicationProvider {
     }
   }
 
+  /**
+   * Look up contact names for a list of phone numbers.
+   * Returns a map of phone number -> contact name.
+   */
+  async lookupContactNamesByPhone(credentialsString: string, phoneNumbers: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (!phoneNumbers.length) return result;
+
+    try {
+      const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
+      const client = this.createClient(credentials.apiKey);
+
+      // Fetch contacts (limited to avoid fetching thousands)
+      const params: Record<string, unknown> = { maxResults: 50 };
+      const response = await client.get('/contacts', { params });
+      const rawContacts = response.data.data || [];
+
+      // Build a lookup map: phone number -> contact name
+      for (const raw of rawContacts) {
+        const defaultFields = raw.defaultFields as Record<string, unknown> || {};
+        const firstName = (defaultFields.firstName as string) || '';
+        const lastName = (defaultFields.lastName as string) || '';
+        const company = (defaultFields.company as string) || '';
+        const name = [firstName, lastName].filter(Boolean).join(' ') || company || '';
+
+        const contactPhones = defaultFields.phoneNumbers as Array<{ value: string }> | undefined;
+        if (contactPhones && name) {
+          for (const cp of contactPhones) {
+            if (cp.value) {
+              // Normalize: store both with and without + for matching
+              const normalized = cp.value.startsWith('+') ? cp.value : '+' + cp.value;
+              result.set(normalized, name);
+              result.set(cp.value, name);
+            }
+          }
+        }
+      }
+
+      // If we didn't find all numbers in the first page, try additional pages
+      // But only if we're still missing lookups
+      const missing = phoneNumbers.filter(pn => !result.has(pn));
+      if (missing.length > 0 && response.data.nextPageToken) {
+        let pageToken = response.data.nextPageToken;
+        let pages = 0;
+        while (pageToken && pages < 10 && missing.some(pn => !result.has(pn))) {
+          const nextResponse = await client.get('/contacts', { params: { maxResults: 50, pageToken } });
+          const nextContacts = nextResponse.data.data || [];
+          for (const raw of nextContacts) {
+            const defaultFields = raw.defaultFields as Record<string, unknown> || {};
+            const firstName = (defaultFields.firstName as string) || '';
+            const lastName = (defaultFields.lastName as string) || '';
+            const company = (defaultFields.company as string) || '';
+            const name = [firstName, lastName].filter(Boolean).join(' ') || company || '';
+
+            const contactPhones = defaultFields.phoneNumbers as Array<{ value: string }> | undefined;
+            if (contactPhones && name) {
+              for (const cp of contactPhones) {
+                if (cp.value) {
+                  const normalized = cp.value.startsWith('+') ? cp.value : '+' + cp.value;
+                  result.set(normalized, name);
+                  result.set(cp.value, name);
+                }
+              }
+            }
+          }
+          pageToken = nextResponse.data.nextPageToken;
+          pages++;
+        }
+      }
+
+      this.logger.log(`Contact lookup: found ${result.size / 2} names for ${phoneNumbers.length} phone numbers`);
+    } catch (error: unknown) {
+      const axiosError = error as { message?: string };
+      this.logger.warn(`Failed to lookup contacts by phone: ${axiosError.message}`);
+    }
+
+    return result;
+  }
+
   async getOpenPhoneContacts(workspaceId: string, limit?: number): Promise<OpenPhoneContact[]> {
     try {
       const credentials = JSON.parse(workspaceId) as OpenPhoneCredentials;
