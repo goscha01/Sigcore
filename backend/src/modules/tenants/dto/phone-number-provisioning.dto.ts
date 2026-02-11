@@ -10,6 +10,14 @@ export class SearchPhoneNumbersDto {
   @IsOptional()
   areaCode?: string;
 
+  @IsString()
+  @IsOptional()
+  locality?: string;
+
+  @IsString()
+  @IsOptional()
+  region?: string;
+
   @IsBoolean()
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

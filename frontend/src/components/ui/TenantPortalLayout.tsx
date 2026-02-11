@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Radio, User, PhoneCall, ClipboardList, DollarSign, LogOut } from 'lucide-react';
+import { User, PhoneCall, ClipboardList, DollarSign, LogOut } from 'lucide-react';
 import { useTenantAuthStore } from '../../store/tenantAuthStore';
 
 export default function TenantPortalLayout() {
@@ -27,13 +27,10 @@ export default function TenantPortalLayout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
-              <Radio className="h-8 w-8 text-primary-600" />
-              <div>
-                <span className="text-xl font-bold text-gray-900">Sigcore</span>
-                <span className="ml-2 text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
-                  Portal
-                </span>
-              </div>
+              <img src="/logo.png" alt="Sigcore" className="h-9 w-auto" />
+              <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
+                Portal
+              </span>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600">

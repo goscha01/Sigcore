@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 
 interface TestResult {
@@ -26,6 +26,11 @@ export default function AdminIntegrationTestPage() {
   const [twilioTest, setTwilioTest] = useState<TestResult>({ status: 'idle' });
   const [provisioningTest, setProvisioningTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
+
+  // Phone number search filters
+  const [searchAreaCode, setSearchAreaCode] = useState('');
+  const [searchLocality, setSearchLocality] = useState('');
+  const [searchRegion, setSearchRegion] = useState('');
 
   // Connect OpenPhone
   const handleConnectOpenPhone = async (e: React.FormEvent) => {
@@ -123,14 +128,25 @@ export default function AdminIntegrationTestPage() {
   const testPhoneProvisioning = async () => {
     setProvisioningTest({ status: 'loading' });
     try {
-      // Search for available phone numbers from Twilio
-      const availableNumbers = await adminApi.searchAvailablePhoneNumbers('US');
+      const options: { areaCode?: string; locality?: string; region?: string } = {};
+      if (searchAreaCode.trim()) options.areaCode = searchAreaCode.trim();
+      if (searchLocality.trim()) options.locality = searchLocality.trim();
+      if (searchRegion.trim()) options.region = searchRegion.trim();
+
+      const availableNumbers = await adminApi.searchAvailablePhoneNumbers('US', Object.keys(options).length > 0 ? options : undefined);
+
+      const filterDesc = [
+        options.areaCode && `area code ${options.areaCode}`,
+        options.locality && `city "${options.locality}"`,
+        options.region && `state "${options.region}"`,
+      ].filter(Boolean).join(', ');
 
       setProvisioningTest({
         status: 'success',
-        message: `Phone propagation test successful! Found ${availableNumbers.length} available phone numbers from Twilio that can be provisioned.`,
+        message: `Found ${availableNumbers.length} available phone numbers${filterDesc ? ` for ${filterDesc}` : ''}.`,
         data: {
-          availableNumbers: availableNumbers.slice(0, 5), // Show first 5
+          searchFilters: { country: 'US', ...options },
+          availableNumbers: availableNumbers.slice(0, 5),
           totalAvailable: availableNumbers.length,
         },
       });
@@ -474,14 +490,100 @@ export default function AdminIntegrationTestPage() {
 
         {/* Propagation Test */}
         <div className="grid grid-cols-1 mt-6">
-          {renderTestCard(
-            'Phone Number Provisioning from Twilio',
-            'Search available Twilio phone numbers that can be purchased/provisioned',
-            RefreshCw,
-            provisioningTest,
-            testPhoneProvisioning,
-            'bg-blue-100 text-blue-600'
-          )}
+          <div className="card">
+            <div className="p-5 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-100 text-blue-600">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Phone Number Provisioning from Twilio</h3>
+                    <p className="text-sm text-gray-500">Search available Twilio phone numbers by area code, city, or state</p>
+                  </div>
+                </div>
+                <button
+                  onClick={testPhoneProvisioning}
+                  disabled={provisioningTest.status === 'loading'}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  {provisioningTest.status === 'loading' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  Search Numbers
+                </button>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Area Code</label>
+                  <input
+                    type="text"
+                    value={searchAreaCode}
+                    onChange={(e) => setSearchAreaCode(e.target.value)}
+                    placeholder="e.g. 415, 212, 310"
+                    className="input w-full"
+                    maxLength={3}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  <input
+                    type="text"
+                    value={searchLocality}
+                    onChange={(e) => setSearchLocality(e.target.value)}
+                    placeholder="e.g. San Francisco"
+                    className="input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
+                  <input
+                    type="text"
+                    value={searchRegion}
+                    onChange={(e) => setSearchRegion(e.target.value)}
+                    placeholder="e.g. CA, NY, TX"
+                    className="input w-full"
+                    maxLength={2}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">All filters are optional. Leave empty to search all available US numbers.</p>
+            </div>
+            {provisioningTest.status !== 'idle' && provisioningTest.status !== 'loading' && (
+              <div className={`p-5 border-t ${
+                provisioningTest.status === 'success' ? 'bg-green-50' : 'bg-red-50'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {provisioningTest.status === 'success' ? (
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium ${
+                      provisioningTest.status === 'success' ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                      {provisioningTest.message}
+                    </p>
+                    {provisioningTest.data && (
+                      <details className="mt-2">
+                        <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-900">
+                          View Details
+                        </summary>
+                        <pre className="mt-2 text-xs bg-white p-3 rounded border border-gray-200 overflow-auto max-h-64">
+                          {JSON.stringify(provisioningTest.data, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

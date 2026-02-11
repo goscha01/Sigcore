@@ -840,12 +840,13 @@ export class TwilioProvider implements CommunicationProvider {
     credentials: TwilioCredentials | string,
     country: string,
     areaCode?: string,
+    options?: { locality?: string; region?: string },
   ): Promise<Array<{ phoneNumber: string; locality?: string; region?: string; capabilities?: string[] }>> {
     try {
       const creds = typeof credentials === 'string' ? JSON.parse(credentials) as TwilioCredentials : credentials;
       const client = this.createClient(creds);
 
-      this.logger.log(`Searching for available numbers in ${country} ${areaCode || ''}`);
+      this.logger.log(`Searching for available numbers in ${country} areaCode=${areaCode || ''} locality=${options?.locality || ''} region=${options?.region || ''}`);
 
       const searchParams: any = {
         limit: 10,
@@ -853,6 +854,14 @@ export class TwilioProvider implements CommunicationProvider {
 
       if (areaCode) {
         searchParams.areaCode = areaCode;
+      }
+
+      if (options?.locality) {
+        searchParams.inLocality = options.locality;
+      }
+
+      if (options?.region) {
+        searchParams.inRegion = options.region;
       }
 
       const availableNumbers = await client.availablePhoneNumbers(country).local.list(searchParams);

@@ -213,9 +213,11 @@ class AdminApiService {
     return response.data.data;
   }
 
-  async searchAvailablePhoneNumbers(country: string = 'US', areaCode?: string): Promise<any[]> {
+  async searchAvailablePhoneNumbers(country: string = 'US', options?: { areaCode?: string; locality?: string; region?: string }): Promise<any[]> {
     const queryParams = new URLSearchParams({ country });
-    if (areaCode) queryParams.append('areaCode', areaCode);
+    if (options?.areaCode) queryParams.append('areaCode', options.areaCode);
+    if (options?.locality) queryParams.append('locality', options.locality);
+    if (options?.region) queryParams.append('region', options.region);
     queryParams.append('smsCapable', 'true');
     queryParams.append('voiceCapable', 'true');
 

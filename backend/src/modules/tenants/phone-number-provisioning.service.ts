@@ -92,9 +92,9 @@ export class PhoneNumberProvisioningService {
     workspaceId: string,
     country: string,
     areaCode?: string,
-    options?: { smsCapable?: boolean; voiceCapable?: boolean },
+    options?: { smsCapable?: boolean; voiceCapable?: boolean; locality?: string; region?: string },
   ): Promise<AvailableNumberWithPricing[]> {
-    this.logger.log(`Searching available numbers: workspace=${workspaceId}, country=${country}, areaCode=${areaCode}`);
+    this.logger.log(`Searching available numbers: workspace=${workspaceId}, country=${country}, areaCode=${areaCode}, locality=${options?.locality}, region=${options?.region}`);
 
     // Get Twilio integration
     const integration = await this.integrationRepo.findOne({
@@ -112,6 +112,7 @@ export class PhoneNumberProvisioningService {
       credentials,
       country,
       areaCode,
+      { locality: options?.locality, region: options?.region },
     );
 
     // Get pricing config

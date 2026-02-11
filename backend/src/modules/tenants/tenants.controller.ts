@@ -241,7 +241,7 @@ export class TenantsController {
       workspaceId,
       query.country,
       query.areaCode,
-      { smsCapable: query.smsCapable, voiceCapable: query.voiceCapable },
+      { smsCapable: query.smsCapable, voiceCapable: query.voiceCapable, locality: query.locality, region: query.region },
     );
     return { data: numbers };
   }
@@ -660,7 +660,7 @@ export class LeadBridgeTenantsController {
       workspaceId,
       query.country,
       query.areaCode,
-      { smsCapable: query.smsCapable, voiceCapable: query.voiceCapable },
+      { smsCapable: query.smsCapable, voiceCapable: query.voiceCapable, locality: query.locality, region: query.region },
     );
     return { data: numbers };
   }
