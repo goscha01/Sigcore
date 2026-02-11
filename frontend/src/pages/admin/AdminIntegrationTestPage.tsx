@@ -22,6 +22,7 @@ export default function AdminIntegrationTestPage() {
 
   // Test results state
   const [openPhoneTest, setOpenPhoneTest] = useState<TestResult>({ status: 'idle' });
+  const [openPhoneConversationsTest, setOpenPhoneConversationsTest] = useState<TestResult>({ status: 'idle' });
   const [twilioTest, setTwilioTest] = useState<TestResult>({ status: 'idle' });
   const [syncTest, setSyncTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
@@ -94,6 +95,25 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
+  // Test OpenPhone Conversations
+  const testOpenPhoneConversations = async () => {
+    setOpenPhoneConversationsTest({ status: 'loading' });
+    try {
+      const result = await adminApi.getConversations({ provider: 'openphone', limit: 3 });
+      const conversations = result.data || [];
+      setOpenPhoneConversationsTest({
+        status: 'success',
+        message: `Found ${conversations.length} recent conversations from OpenPhone`,
+        data: { conversations, meta: result.meta },
+      });
+    } catch (err: any) {
+      setOpenPhoneConversationsTest({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to fetch OpenPhone conversations',
+      });
+    }
+  };
+
   // Test Twilio Connection
   const testTwilio = async () => {
     setTwilioTest({ status: 'loading' });
@@ -116,14 +136,30 @@ export default function AdminIntegrationTestPage() {
   const testPhonePropagation = async () => {
     setSyncTest({ status: 'loading' });
     try {
+      // Step 1: Fetch Twilio phone numbers
       const twilioNumbers = await adminApi.getTwilioPhoneNumbers();
+
+      // Step 2: Trigger sync to propagate conversations/messages into the system
       const syncResult = await adminApi.startSync({ provider: 'twilio', limit: 10 });
+
+      // Step 3: Wait a bit for sync to process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Step 4: Check sync status
       const status = await adminApi.getSyncStatus();
+
+      // Step 5: Fetch conversations to see if they were propagated
+      const conversations = await adminApi.getConversations({ provider: 'twilio', limit: 5 });
 
       setSyncTest({
         status: 'success',
-        message: `Sync started! Found ${twilioNumbers.length} Twilio numbers. Sync status: ${status.status || 'running'}`,
-        data: { twilioNumbers, syncResult, status },
+        message: `Phone propagation test complete! Found ${twilioNumbers.length} Twilio numbers, synced ${conversations.data?.length || 0} conversations into the system.`,
+        data: {
+          twilioNumbers: twilioNumbers.slice(0, 3), // Show first 3 numbers
+          syncResult,
+          syncStatus: status,
+          propagatedConversations: conversations.data || [],
+        },
       });
     } catch (err: any) {
       setSyncTest({
@@ -410,6 +446,8 @@ export default function AdminIntegrationTestPage() {
       {/* Test Cards */}
       <div className="border-t border-gray-200 pt-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Test Integrations</h2>
+
+        {/* Connection Tests */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {renderTestCard(
             'OpenPhone Connection',
@@ -430,10 +468,23 @@ export default function AdminIntegrationTestPage() {
           )}
         </div>
 
+        {/* OpenPhone Conversations Test */}
+        <div className="grid grid-cols-1 mt-6">
+          {renderTestCard(
+            'OpenPhone Last 3 Conversations',
+            'Fetch the 3 most recent conversations from OpenPhone',
+            MessageSquare,
+            openPhoneConversationsTest,
+            testOpenPhoneConversations,
+            'bg-purple-100 text-purple-600'
+          )}
+        </div>
+
+        {/* Propagation Test */}
         <div className="grid grid-cols-1 mt-6">
           {renderTestCard(
             'Phone Propagation from Twilio',
-            'Test fetching Twilio numbers and syncing them to the system',
+            'Test syncing Twilio conversations into the system database',
             RefreshCw,
             syncTest,
             testPhonePropagation,
@@ -451,7 +502,7 @@ export default function AdminIntegrationTestPage() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">2.</span>
-            <span>Connect Twilio by entering your Account SID and Auth Token from Twilio console.</span>
+            <span>Connect Twilio by entering your Account SID and Auth Token from Twilio console (use real or trial account credentials, not test credentials).</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">3.</span>
@@ -459,13 +510,26 @@ export default function AdminIntegrationTestPage() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">4.</span>
-            <span>Test phone propagation to verify that Twilio numbers can be synced to the system.</span>
+            <span>Test OpenPhone conversations to see the 3 most recent conversations.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary-600 font-bold">5.</span>
+            <span><strong>Test Phone Propagation:</strong> This will sync Twilio conversations and messages into your system's database. The test shows: (a) Twilio phone numbers, (b) sync status, (c) conversations now stored in your database.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-primary-600 font-bold">6.</span>
             <span>Click "Load Integrations" to see all configured integrations.</span>
           </li>
         </ul>
+
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <h4 className="text-xs font-semibold text-blue-900 mb-1">What is Propagation?</h4>
+          <p className="text-xs text-blue-800">
+            Propagation means syncing data from Twilio/OpenPhone into your Sigcore database. When you click "Test Phone Propagation",
+            the system will fetch conversations and messages from Twilio and save them locally. This allows you to query, search,
+            and analyze the data without making repeated API calls to Twilio.
+          </p>
+        </div>
       </div>
     </div>
   );

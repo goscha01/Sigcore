@@ -212,6 +212,15 @@ class AdminApiService {
     const response = await this.client.get<ApiResponse<any>>('/integrations/sync/status');
     return response.data.data;
   }
+
+  async getConversations(params?: { provider?: string; limit?: number }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.provider) queryParams.append('provider', params.provider);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const response = await this.client.get<any>(`/v1/conversations?${queryParams.toString()}`);
+    return response.data;
+  }
 }
 
 export const adminApi = new AdminApiService();
