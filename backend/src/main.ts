@@ -8,10 +8,29 @@ async function bootstrap() {
     rawBody: true, // Needed for webhook signature verification
   });
 
+  const configService = app.get(ConfigService);
   const logger = new Logger('HTTP');
 
+  // Enable CORS FIRST — must run before any other middleware
+  // so preflight OPTIONS requests get CORS headers immediately.
+  const callioBackendUrl = configService.get('CALLIO_BACKEND_URL') || 'http://localhost:3001';
+  app.enableCors({
+    origin: [
+      'http://localhost:3001',
+      'http://localhost:3000',
+      callioBackendUrl,
+      /\.railway\.app$/,
+      /\.vercel\.app$/,
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-API-Key', 'x-api-key', 'x-sigcore-key', 'x-workspace-id'],
+    exposedHeaders: ['Content-Length', 'X-Request-Id'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+  });
+
   // Ensure all API responses have Content-Type: application/json
-  // (prevents double-encoding when downstream consumers like Callio don't get the header)
   app.use('/api', (req: any, res: any, next: () => void) => {
     const originalJson = res.json.bind(res);
     res.json = (body: unknown) => {
@@ -37,45 +56,6 @@ async function bootstrap() {
     });
 
     next();
-  });
-
-  const configService = app.get(ConfigService);
-
-  // Enable CORS for Callio backend and other allowed origins
-  const callioBackendUrl = configService.get('CALLIO_BACKEND_URL') || 'http://localhost:3001';
-  const allowedOrigins = [
-    'http://localhost:3001',
-    'http://localhost:3000',
-    callioBackendUrl,
-    /\.railway\.app$/,
-    /\.vercel\.app$/,
-  ];
-
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        return callback(null, true);
-      }
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (allowed instanceof RegExp) {
-          return allowed.test(origin);
-        }
-        return allowed === origin;
-      });
-
-      if (isAllowed) {
-        callback(null, true);
-      } else {
-        console.log(`CORS blocked origin: ${origin}`);
-        callback(null, true); // Allow anyway for now
-      }
-    },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'x-api-key', 'x-sigcore-key', 'x-workspace-id'],
-    exposedHeaders: ['Content-Length', 'X-Request-Id'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
   });
 
   // Global validation pipe
