@@ -642,6 +642,16 @@ export class OpenPhoneProvider implements CommunicationProvider {
   }
 
   /**
+   * Normalize a phone number to just its last 10 digits for matching.
+   * This handles all format differences: +1(865)385-9897 vs +18653859897 vs 8653859897
+   */
+  private normalizePhoneDigits(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    // For US numbers: take last 10 digits (strip country code)
+    return digits.length > 10 ? digits.slice(-10) : digits;
+  }
+
+  /**
    * Look up contact names for a list of phone numbers.
    * Fetches ALL contacts to ensure no names are missed.
    * Returns a map of phone number -> contact name.
@@ -650,38 +660,55 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const result = new Map<string, string>();
     if (!phoneNumbers.length) return result;
 
+    // Build a normalized lookup set: last-10-digits -> original phone number
+    const normalizedLookup = new Map<string, string>();
+    for (const pn of phoneNumbers) {
+      normalizedLookup.set(this.normalizePhoneDigits(pn), pn);
+    }
+
     try {
       const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
       const client = this.createClient(credentials.apiKey);
 
-      // Helper to extract name and phone numbers from a raw contact
-      const processContact = (raw: Record<string, unknown>) => {
+      // Helper to extract phone numbers from a contact (handles multiple formats)
+      const extractPhones = (raw: Record<string, unknown>): string[] => {
+        const phones: string[] = [];
+        const defaultFields = raw.defaultFields as Record<string, unknown> || {};
+        const contactPhones = defaultFields.phoneNumbers;
+
+        if (Array.isArray(contactPhones)) {
+          for (const cp of contactPhones) {
+            if (typeof cp === 'string') {
+              phones.push(cp);
+            } else if (cp && typeof cp === 'object') {
+              // Could be { value: string } or { number: string } or { phoneNumber: string }
+              const val = (cp as any).value || (cp as any).number || (cp as any).phoneNumber;
+              if (typeof val === 'string') phones.push(val);
+            }
+          }
+        }
+
+        // Also check top-level phoneNumber field (some contact types)
+        if (typeof raw.phoneNumber === 'string') phones.push(raw.phoneNumber);
+        if (typeof (raw as any).phone === 'string') phones.push((raw as any).phone);
+
+        return phones;
+      };
+
+      // Helper to extract name from a contact
+      const extractName = (raw: Record<string, unknown>): string => {
         const defaultFields = raw.defaultFields as Record<string, unknown> || {};
         const firstName = (defaultFields.firstName as string) || '';
         const lastName = (defaultFields.lastName as string) || '';
         const company = (defaultFields.company as string) || '';
-        const name = [firstName, lastName].filter(Boolean).join(' ') || company || '';
-
-        const contactPhones = defaultFields.phoneNumbers as Array<{ value: string }> | undefined;
-        if (contactPhones && name) {
-          for (const cp of contactPhones) {
-            if (cp.value) {
-              // Normalize phone numbers for matching: strip all non-digit chars except +
-              const cleaned = cp.value.replace(/[^+\d]/g, '');
-              const withPlus = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
-              const withoutPlus = withPlus.substring(1);
-              result.set(withPlus, name);
-              result.set(withoutPlus, name);
-              result.set(cp.value, name); // Also store original format
-            }
-          }
-        }
+        return [firstName, lastName].filter(Boolean).join(' ') || company || '';
       };
 
-      // Fetch ALL contacts with pagination until we find all numbers we need
       let pageToken: string | null = null;
       let pageCount = 0;
-      const maxPages = 100; // Safety limit
+      let totalContacts = 0;
+      const maxPages = 100;
+      let loggedSample = false;
 
       do {
         const params: Record<string, unknown> = { maxResults: 50 };
@@ -689,9 +716,42 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
         const response = await client.get('/contacts', { params });
         const rawContacts = response.data.data || [];
+        totalContacts += rawContacts.length;
+
+        // Log the structure of the first contact for debugging
+        if (!loggedSample && rawContacts.length > 0) {
+          const sample = rawContacts[0];
+          const sampleFields = sample.defaultFields || {};
+          this.logger.log(`Contact sample - keys: ${Object.keys(sample).join(', ')}`);
+          this.logger.log(`Contact sample defaultFields keys: ${Object.keys(sampleFields).join(', ')}`);
+          if (sampleFields.phoneNumbers) {
+            this.logger.log(`Contact sample phoneNumbers: ${JSON.stringify(sampleFields.phoneNumbers).substring(0, 200)}`);
+          }
+          loggedSample = true;
+        }
 
         for (const raw of rawContacts) {
-          processContact(raw);
+          const name = extractName(raw);
+          if (!name) continue;
+
+          const phones = extractPhones(raw);
+          for (const phone of phones) {
+            const normalized = this.normalizePhoneDigits(phone);
+
+            // Store by normalized (last 10 digits) AND by original formats
+            if (normalizedLookup.has(normalized)) {
+              const originalKey = normalizedLookup.get(normalized)!;
+              result.set(originalKey, name);
+            }
+
+            // Also store by exact formats for direct lookups
+            const cleaned = phone.replace(/[^+\d]/g, '');
+            const withPlus = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
+            const withoutPlus = withPlus.substring(1);
+            result.set(withPlus, name);
+            result.set(withoutPlus, name);
+            result.set(phone, name);
+          }
         }
 
         pageToken = response.data.nextPageToken || null;
@@ -700,18 +760,19 @@ export class OpenPhoneProvider implements CommunicationProvider {
         // Check if we've found all the numbers we need
         const allFound = phoneNumbers.every(pn => result.has(pn));
         if (allFound) {
-          this.logger.log(`Found all ${phoneNumbers.length} contact names after ${pageCount} pages`);
+          this.logger.log(`Found all ${phoneNumbers.length} contact names after ${pageCount} pages (${totalContacts} contacts)`);
           break;
         }
       } while (pageToken && pageCount < maxPages);
 
       const foundCount = phoneNumbers.filter(pn => result.has(pn)).length;
-      this.logger.log(`Contact lookup: found ${foundCount}/${phoneNumbers.length} names after ${pageCount} pages`);
+      this.logger.log(`Contact lookup: found ${foundCount}/${phoneNumbers.length} names after ${pageCount} pages (${totalContacts} contacts)`);
 
       // Log which numbers were NOT found for debugging
       const notFound = phoneNumbers.filter(pn => !result.has(pn));
       if (notFound.length > 0) {
         this.logger.warn(`Contact names NOT found for: ${notFound.join(', ')}`);
+        this.logger.warn(`Normalized forms not found: ${notFound.map(pn => this.normalizePhoneDigits(pn)).join(', ')}`);
       }
     } catch (error: unknown) {
       const axiosError = error as { message?: string };
