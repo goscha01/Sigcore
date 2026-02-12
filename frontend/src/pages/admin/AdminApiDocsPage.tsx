@@ -310,10 +310,10 @@ export default function AdminApiDocsPage() {
         {
           method: 'POST',
           path: '/tenants',
-          description: 'Create a new tenant.',
+          description: 'Create a new tenant. externalId is auto-generated from name if not provided. webhookSecret is auto-generated.',
           auth: 'X-API-Key',
-          body: { externalId: 'acme_123', name: 'Acme Corp', metadata: {} },
-          response: { data: { id: 'uuid', externalId: 'acme_123', name: 'Acme Corp' } },
+          body: { name: 'Acme Corp' },
+          response: { data: { id: 'uuid', externalId: 'acme-corp-a1b2', name: 'Acme Corp', webhookSecret: '64-char-hex...' } },
         },
         {
           method: 'GET',
@@ -339,47 +339,61 @@ export default function AdminApiDocsPage() {
           response: null,
         },
         {
-          method: 'PUT',
-          path: '/tenants/:id/webhook',
-          description: 'Configure webhook URL for tenant event notifications.',
+          method: 'GET',
+          path: '/tenants/:id/integrations',
+          description: 'Get integrations connected by a tenant.',
           auth: 'X-API-Key',
-          body: { webhookUrl: 'https://your-app.com/webhook', webhookSecret: 'secret_key' },
-          response: { data: { webhookUrl: 'https://your-app.com/webhook' } },
+          response: { data: [{ id: 'uuid', provider: 'openphone', status: 'active' }] },
         },
       ],
     },
     {
       category: 'Webhook Subscriptions',
-      description: 'Subscribe to real-time events via webhooks.',
+      description: 'Subscribe to real-time events via outbound webhooks. The signing secret is auto-filled from the tenant record — no manual secret management needed.',
       items: [
         {
           method: 'GET',
           path: '/webhook-subscriptions',
           description: 'List all webhook subscriptions.',
           auth: 'X-API-Key',
-          response: { data: [{ id: 'uuid', name: 'My Webhook', webhookUrl: 'https://...', events: ['message.inbound'], active: true }] },
+          response: { data: [{ id: 'uuid', name: 'My Webhook', webhookUrl: 'https://...', events: ['message.inbound'], status: 'active' }] },
         },
         {
           method: 'POST',
           path: '/webhook-subscriptions',
-          description: 'Create a webhook subscription for specific events.',
+          description: 'Create a webhook subscription. The signing secret is auto-filled from the tenant record (no need to provide it).',
           auth: 'X-API-Key',
-          body: { name: 'Message Notifications', webhookUrl: 'https://your-app.com/webhook', secret: 'your_secret', events: ['message.inbound', 'message.sent', 'call.completed'] },
-          response: { data: { id: 'uuid', name: 'Message Notifications', webhookUrl: 'https://your-app.com/webhook', events: ['message.inbound', 'message.sent', 'call.completed'] } },
+          body: { name: 'Message Notifications', webhookUrl: 'https://your-app.com/webhooks/sigcore', events: ['message.inbound', 'message.sent', 'call.completed', 'call.missed'] },
+          response: { data: { id: 'uuid', name: 'Message Notifications', webhookUrl: 'https://your-app.com/webhooks/sigcore', events: ['message.inbound', 'message.sent', 'call.completed', 'call.missed'], status: 'active' } },
+        },
+        {
+          method: 'PATCH',
+          path: '/webhook-subscriptions/:id',
+          description: 'Update a webhook subscription (name, URL, events, or status).',
+          auth: 'X-API-Key',
+          body: { webhookUrl: 'https://new-url.com/webhook', events: ['message.inbound'] },
+          response: { data: { id: 'uuid', webhookUrl: 'https://new-url.com/webhook', events: ['message.inbound'] } },
+        },
+        {
+          method: 'GET',
+          path: '/webhook-subscriptions/secret',
+          description: 'Get the tenant webhook signing secret. Tenants use this to verify inbound webhook signatures (X-Callio-Signature header).',
+          auth: 'X-API-Key',
+          response: { data: { secret: '64-char-hex-string...' } },
         },
         {
           method: 'POST',
           path: '/webhook-subscriptions/:id/test',
           description: 'Send a test event to verify your webhook endpoint.',
           auth: 'X-API-Key',
-          response: { data: { success: true, statusCode: 200 } },
+          response: { data: { success: true } },
         },
         {
           method: 'GET',
           path: '/webhook-subscriptions/events/types',
           description: 'Get all available event types you can subscribe to.',
-          auth: 'None',
-          response: { data: ['message.inbound', 'message.sent', 'message.delivered', 'message.failed', 'call.started', 'call.completed', 'call.missed'] },
+          auth: 'X-API-Key',
+          response: { data: [{ event: 'message.inbound', description: 'Triggered when an inbound message is received' }, { event: 'message.sent', description: 'Triggered when a message is sent' }] },
         },
         {
           method: 'DELETE',
@@ -443,7 +457,7 @@ export default function AdminApiDocsPage() {
           path: '/api-keys',
           description: 'List all API keys.',
           auth: 'X-API-Key',
-          response: { data: [{ id: 'uuid', name: 'Production Key', keyPreview: 'sk_...xyz', active: true, createdAt: '2026-01-01T...' }] },
+          response: { data: [{ id: 'uuid', name: 'Production Key', keyPreview: 'sc_...xyz', active: true, createdAt: '2026-01-01T...' }] },
         },
         {
           method: 'POST',
@@ -451,7 +465,7 @@ export default function AdminApiDocsPage() {
           description: 'Create a new API key. The full key is only shown once.',
           auth: 'X-API-Key',
           body: { name: 'Production Key' },
-          response: { data: { apiKey: { id: 'uuid', name: 'Production Key' }, fullKey: 'sk_live_abc123...' } },
+          response: { data: { apiKey: { id: 'uuid', name: 'Production Key' }, fullKey: 'sc_workspace_abc123...' } },
         },
         {
           method: 'PATCH',
@@ -479,14 +493,14 @@ export default function AdminApiDocsPage() {
           description: 'Create an API key scoped to a tenant.',
           auth: 'X-API-Key',
           body: { name: 'Tenant Portal Key' },
-          response: { data: { apiKey: { id: 'uuid', name: 'Tenant Portal Key' }, fullKey: 'sk_tenant_abc123...' } },
+          response: { data: { apiKey: { id: 'uuid', name: 'Tenant Portal Key' }, fullKey: 'sc_tenant_abc123...' } },
         },
         {
           method: 'GET',
           path: '/tenants/:tenantId/api-keys',
           description: 'List API keys for a tenant.',
           auth: 'X-API-Key',
-          response: { data: [{ id: 'uuid', name: 'Tenant Portal Key', keyPreview: 'sk_...xyz' }] },
+          response: { data: [{ id: 'uuid', name: 'Tenant Portal Key', keyPreview: 'sc_...xyz' }] },
         },
         {
           method: 'DELETE',
@@ -548,7 +562,7 @@ export default function AdminApiDocsPage() {
           path: '/portal/auth',
           description: 'Authenticate a tenant with their API key.',
           auth: 'None',
-          body: { apiKey: 'sk_tenant_abc123...' },
+          body: { apiKey: 'sc_tenant_abc123...' },
           response: { data: { tenant: { id: 'uuid', name: 'Acme Corp' }, token: '...' } },
         },
         {
@@ -618,10 +632,10 @@ export default function AdminApiDocsPage() {
           All API requests require authentication using an API key. Include your API key in the request header:
         </p>
         <code className="block p-3 bg-gray-50 rounded border border-gray-200 text-sm font-mono">
-          X-API-Key: your_api_key_here
+          x-api-key: sc_tenant_your_api_key_here
         </code>
         <p className="text-xs text-gray-500 mt-3">
-          Service-to-service auth is also supported via <code className="text-xs">X-Sigcore-Key</code> + <code className="text-xs">X-Workspace-Id</code> headers.
+          Tenant API keys (prefixed <code className="text-xs">sc_tenant_</code>) automatically resolve the workspace and tenant context. No additional headers are needed.
         </p>
       </div>
 
@@ -667,9 +681,38 @@ socket.emit('join', workspaceId);  // from GET /integrations/all`}</pre>
         </div>
       </div>
 
-      {/* Webhooks Info */}
+      {/* Outbound Webhooks */}
       <div className="card p-5">
-        <h3 className="text-lg font-semibold text-gray-900 mb-3">Incoming Webhooks</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Outbound Webhook Signatures</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          When Sigcore sends webhooks to your subscription URL, each request includes these headers for verification:
+        </p>
+        <div className="space-y-2 text-sm mb-4">
+          <div className="flex items-start gap-3 p-2 bg-gray-50 rounded">
+            <code className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-xs whitespace-nowrap">X-Callio-Event</code>
+            <span className="text-gray-600 text-xs">The event type (e.g., <code className="text-xs">message.inbound</code>)</span>
+          </div>
+          <div className="flex items-start gap-3 p-2 bg-gray-50 rounded">
+            <code className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-xs whitespace-nowrap">X-Callio-Timestamp</code>
+            <span className="text-gray-600 text-xs">ISO 8601 timestamp of when the event was sent</span>
+          </div>
+          <div className="flex items-start gap-3 p-2 bg-gray-50 rounded">
+            <code className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-xs whitespace-nowrap">X-Callio-Signature</code>
+            <span className="text-gray-600 text-xs">HMAC-SHA256 hex digest of the request body, signed with the tenant&apos;s webhook secret. Fetch secret via <code className="text-xs">GET /webhook-subscriptions/secret</code></span>
+          </div>
+        </div>
+        <pre className="p-3 bg-gray-900 text-gray-100 rounded text-xs overflow-auto">{`// Verify webhook signature (Node.js)
+const crypto = require('crypto');
+const computed = crypto.createHmac('sha256', webhookSecret)
+  .update(rawBody).digest('hex');
+if (computed !== req.headers['x-callio-signature']) {
+  throw new Error('Invalid signature');
+}`}</pre>
+      </div>
+
+      {/* Incoming Provider Webhooks */}
+      <div className="card p-5">
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Incoming Provider Webhooks</h3>
         <p className="text-sm text-gray-600 mb-3">
           Sigcore receives webhooks from connected providers at these endpoints. These are configured automatically when you connect an integration.
         </p>
@@ -711,7 +754,7 @@ socket.emit('join', workspaceId);  // from GET /integrations/all`}</pre>
             {category.items.map((endpoint, idx) => {
               const endpointId = `${category.category}-${idx}`;
               const curlCommand = `curl -X ${endpoint.method} "${baseUrl}${endpoint.path}${endpoint.query ? '?' + endpoint.query : ''}" \\
-  -H "X-API-Key: your_api_key_here"${endpoint.body ? ` \\
+  -H "x-api-key: sc_tenant_your_api_key_here"${endpoint.body ? ` \\
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify(endpoint.body, null, 2)}'` : ''}`;
 
