@@ -580,7 +580,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
    * This works around the stale lastActivityAt issue with /conversations while
    * satisfying the /messages requirement for a participants array.
    */
-  async getRecentConversationsByMessages(credentialsString: string, limit: number = 3): Promise<Array<{
+  async getRecentConversationsByMessages(credentialsString: string, limit: number = 10): Promise<Array<{
     participantPhone: string;
     phoneNumberId: string;
     phoneNumber: string;
@@ -596,20 +596,28 @@ export class OpenPhoneProvider implements CommunicationProvider {
     // Get all phone numbers for this workspace
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Step 1: Fetch ALL conversations from /conversations endpoint (paginate through all pages)
-    // We need all conversations because OpenPhone's lastActivityAt is stale -
-    // a conversation started 3 months ago with a message from today might have
-    // an old lastActivityAt and would be missed if we only fetch the first page.
-    const allConversations: Array<Record<string, unknown>> = [];
+    // Step 1: Fetch only RECENTLY UPDATED conversations using API filters
+    // instead of paginating through every conversation ever created.
+    // Use updatedAfter (30 days) + excludeInactive to get a small, relevant set.
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const updatedAfter = thirtyDaysAgo.toISOString();
+
+    const recentConversations: Array<Record<string, unknown>> = [];
 
     for (const [phoneNumberId] of phoneNumberMap) {
       let pageToken: string | null = null;
       let pageCount = 0;
-      const maxPages = 50; // Safety limit: 50 pages × 100 = 5,000 conversations max per phone
+      const maxPages = 10; // 10 pages × 100 = 1,000 recent conversations max per phone (plenty)
 
       try {
         do {
-          const params: Record<string, unknown> = { phoneNumbers: [phoneNumberId], maxResults: 100 };
+          const params: Record<string, unknown> = {
+            phoneNumbers: [phoneNumberId],
+            maxResults: 100,
+            updatedAfter,
+            excludeInactive: true,
+          };
           if (pageToken) params.pageToken = pageToken;
 
           const response = await client.get('/conversations', { params });
@@ -617,30 +625,28 @@ export class OpenPhoneProvider implements CommunicationProvider {
           for (const conv of conversations) {
             conv._phoneNumberId = phoneNumberId;
           }
-          allConversations.push(...conversations);
+          recentConversations.push(...conversations);
 
           pageToken = response.data.nextPageToken || null;
           pageCount++;
         } while (pageToken && pageCount < maxPages);
 
-        this.logger.log(`Fetched ${allConversations.length} conversations for phone ${phoneNumberId} (${pageCount} pages)`);
+        this.logger.log(`Fetched ${recentConversations.length} recent conversations for phone ${phoneNumberId} (${pageCount} pages, updatedAfter=${updatedAfter})`);
       } catch (error: any) {
         this.logger.warn(`Failed to fetch conversations for phone ${phoneNumberId}: ${error.message}`);
       }
     }
 
-    if (allConversations.length === 0) {
-      this.logger.warn('No conversations found from /conversations endpoint');
+    if (recentConversations.length === 0) {
+      this.logger.warn('No recent conversations found');
       return [];
     }
 
-    this.logger.log(`Total conversations fetched: ${allConversations.length}`);
+    this.logger.log(`Total recent conversations: ${recentConversations.length}`);
 
-    // Step 2: Fetch the latest message for EVERY conversation (not just a subset)
-    // to get accurate timestamps — OpenPhone's lastActivityAt is stale and unreliable.
-    // Process in batches of 5 for concurrency without overwhelming the API.
-    this.logger.log(`Processing ALL ${allConversations.length} conversations to find top ${limit} by actual message time`);
-
+    // Step 2: For each recent conversation, fetch latest message to get accurate timestamp.
+    // Since we already filtered to recent + active, this is a small set (typically 20-50).
+    // Process in batches of 5 for concurrency.
     type ConvResult = {
       participantPhone: string;
       phoneNumberId: string;
@@ -655,8 +661,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const results: ConvResult[] = [];
     const BATCH_SIZE = 5;
 
-    for (let i = 0; i < allConversations.length; i += BATCH_SIZE) {
-      const batch = allConversations.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < recentConversations.length; i += BATCH_SIZE) {
+      const batch = recentConversations.slice(i, i + BATCH_SIZE);
 
       const batchPromises = batch.map(async (conv): Promise<ConvResult | null> => {
         const participants = (conv.participants as string[]) || [];
@@ -670,7 +676,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
             params: {
               phoneNumberId,
               participants,
-              limit: 1,
+              maxResults: 1,
             },
           });
           const messages = response.data.data || [];
@@ -704,7 +710,6 @@ export class OpenPhoneProvider implements CommunicationProvider {
           }
           return null;
         } catch (error: any) {
-          // Fallback to lastActivityAt from /conversations
           const fallbackDate = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(0);
           return {
             participantPhone: participants[0],
@@ -723,11 +728,6 @@ export class OpenPhoneProvider implements CommunicationProvider {
       for (const r of batchResults) {
         if (r) results.push(r);
       }
-
-      // Log progress every 50 conversations
-      if ((i + BATCH_SIZE) % 50 === 0 || i + BATCH_SIZE >= allConversations.length) {
-        this.logger.log(`Checked ${Math.min(i + BATCH_SIZE, allConversations.length)}/${allConversations.length} conversations`);
-      }
     }
 
     // Sort by actual message time and return top N
@@ -735,7 +735,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
       .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
       .slice(0, limit);
 
-    this.logger.log(`Found ${results.length} conversations with messages, returning top ${sorted.length}`);
+    this.logger.log(`Found ${results.length} recent conversations with messages, returning top ${sorted.length}`);
     for (const conv of sorted) {
       this.logger.log(`  Recent: ${conv.participantPhone} | ${conv.lastMessageAt.toISOString()} | ${conv.lastMessageDirection} | "${conv.lastMessagePreview.substring(0, 40)}..."`);
     }
