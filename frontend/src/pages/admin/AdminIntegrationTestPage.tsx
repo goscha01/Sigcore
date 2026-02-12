@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search, ArrowUpRight, ArrowDownLeft, User, Wifi, WifiOff } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw, Phone, MessageSquare, Loader2, Plug, Search, ArrowUpRight, ArrowDownLeft, User, Wifi, WifiOff, Unplug } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { adminApi } from '../../services/adminApi';
 
@@ -19,6 +19,8 @@ export default function AdminIntegrationTestPage() {
   // Connection status
   const [connectingOpenPhone, setConnectingOpenPhone] = useState(false);
   const [connectingTwilio, setConnectingTwilio] = useState(false);
+  const [disconnectingOpenPhone, setDisconnectingOpenPhone] = useState(false);
+  const [disconnectingTwilio, setDisconnectingTwilio] = useState(false);
   const [connectionResult, setConnectionResult] = useState<TestResult>({ status: 'idle' });
 
   // Test results state
@@ -303,6 +305,62 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
+  // Disconnect OpenPhone
+  const handleDisconnectOpenPhone = async () => {
+    if (!confirm('Disconnect OpenPhone? This will unregister webhooks and remove the integration.')) return;
+    setDisconnectingOpenPhone(true);
+    setConnectionResult({ status: 'loading' });
+    try {
+      await adminApi.disconnectOpenPhone();
+      localStorage.removeItem('openphone_conversations');
+      localStorage.removeItem('openphone_conversations_updated');
+      localStorage.removeItem('test_openphone_api_key');
+      setOpenPhoneApiKey('');
+      setOpenPhoneConversationsTest({ status: 'idle' });
+      setOpenPhoneTest({ status: 'idle' });
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setSocketConnected(false);
+      }
+      setConnectionResult({ status: 'success', message: 'OpenPhone disconnected successfully.' });
+      loadIntegrations();
+    } catch (err: any) {
+      setConnectionResult({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to disconnect OpenPhone',
+      });
+    } finally {
+      setDisconnectingOpenPhone(false);
+    }
+  };
+
+  // Disconnect Twilio
+  const handleDisconnectTwilio = async () => {
+    if (!confirm('Disconnect Twilio? This will remove the integration.')) return;
+    setDisconnectingTwilio(true);
+    setConnectionResult({ status: 'loading' });
+    try {
+      await adminApi.disconnectTwilio();
+      localStorage.removeItem('test_twilio_account_sid');
+      localStorage.removeItem('test_twilio_auth_token');
+      localStorage.removeItem('test_twilio_phone_number');
+      setTwilioAccountSid('');
+      setTwilioAuthToken('');
+      setTwilioPhoneNumber('');
+      setTwilioTest({ status: 'idle' });
+      setConnectionResult({ status: 'success', message: 'Twilio disconnected successfully.' });
+      loadIntegrations();
+    } catch (err: any) {
+      setConnectionResult({
+        status: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to disconnect Twilio',
+      });
+    } finally {
+      setDisconnectingTwilio(false);
+    }
+  };
+
   // Test OpenPhone Connection
   const testOpenPhone = async () => {
     setOpenPhoneTest({ status: 'loading' });
@@ -575,23 +633,40 @@ export default function AdminIntegrationTestPage() {
                 Get your API key from OpenPhone dashboard
               </p>
             </div>
-            <button
-              type="submit"
-              disabled={connectingOpenPhone || !openPhoneApiKey}
-              className="btn-primary w-full flex items-center justify-center gap-2"
-            >
-              {connectingOpenPhone ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Plug className="h-4 w-4" />
-                  Connect OpenPhone
-                </>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={connectingOpenPhone || !openPhoneApiKey}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {connectingOpenPhone ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Plug className="h-4 w-4" />
+                    Connect OpenPhone
+                  </>
+                )}
+              </button>
+              {Array.isArray(integrationsData) && integrationsData.some((i: any) => i.provider === 'openphone') && (
+                <button
+                  type="button"
+                  onClick={handleDisconnectOpenPhone}
+                  disabled={disconnectingOpenPhone}
+                  className="btn-secondary flex items-center justify-center gap-2 text-red-600 border-red-300 hover:bg-red-50"
+                >
+                  {disconnectingOpenPhone ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Unplug className="h-4 w-4" />
+                  )}
+                  Disconnect
+                </button>
               )}
-            </button>
+            </div>
           </form>
         </div>
 
@@ -653,23 +728,40 @@ export default function AdminIntegrationTestPage() {
                 E.164 format (e.g., +1234567890)
               </p>
             </div>
-            <button
-              type="submit"
-              disabled={connectingTwilio || !twilioAccountSid || !twilioAuthToken}
-              className="btn-primary w-full flex items-center justify-center gap-2"
-            >
-              {connectingTwilio ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Plug className="h-4 w-4" />
-                  Connect Twilio
-                </>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={connectingTwilio || !twilioAccountSid || !twilioAuthToken}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {connectingTwilio ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Plug className="h-4 w-4" />
+                    Connect Twilio
+                  </>
+                )}
+              </button>
+              {Array.isArray(integrationsData) && integrationsData.some((i: any) => i.provider === 'twilio') && (
+                <button
+                  type="button"
+                  onClick={handleDisconnectTwilio}
+                  disabled={disconnectingTwilio}
+                  className="btn-secondary flex items-center justify-center gap-2 text-red-600 border-red-300 hover:bg-red-50"
+                >
+                  {disconnectingTwilio ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Unplug className="h-4 w-4" />
+                  )}
+                  Disconnect
+                </button>
               )}
-            </button>
+            </div>
           </form>
         </div>
       </div>

@@ -201,6 +201,16 @@ class AdminApiService {
     return response.data.data;
   }
 
+  async disconnectOpenPhone(): Promise<{ success: boolean }> {
+    const response = await this.client.delete<ApiResponse<{ success: boolean }>>('/integrations/openphone/disconnect');
+    return response.data.data;
+  }
+
+  async disconnectTwilio(): Promise<{ success: boolean }> {
+    const response = await this.client.delete<ApiResponse<{ success: boolean }>>('/integrations/twilio');
+    return response.data.data;
+  }
+
   async getOpenPhoneNumbers(): Promise<any[]> {
     const response = await this.client.get<ApiResponse<any[]>>('/integrations/openphone/numbers');
     return response.data.data;
