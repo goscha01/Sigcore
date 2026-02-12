@@ -13,6 +13,7 @@ import {
   Key,
   Eye,
   EyeOff,
+  Link,
 } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 import type { Tenant, TenantApiKeyInfo } from '../../types';
@@ -55,6 +56,15 @@ export default function AdminTenantsPage() {
   const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const apiUrl = `${window.location.origin}/api`;
+
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(apiUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
 
   useEffect(() => {
     loadData();
@@ -274,6 +284,24 @@ export default function AdminTenantsPage() {
 
                 {expandedTenantId === tenant.id && (
                   <div className="mt-4 pl-12">
+                    {/* API URL */}
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Link className="h-4 w-4 text-blue-500" />
+                          <span className="text-sm font-medium text-blue-900">API URL</span>
+                        </div>
+                        <button
+                          onClick={handleCopyUrl}
+                          className={`p-1 rounded ${copiedUrl ? 'text-green-600' : 'text-blue-500 hover:bg-blue-100'}`}
+                          title="Copy API URL"
+                        >
+                          {copiedUrl ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <code className="text-xs font-mono text-blue-800 mt-1 block">{apiUrl}</code>
+                    </div>
+
                     {/* API Keys Section */}
                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                       <Key className="h-4 w-4" />

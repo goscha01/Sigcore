@@ -24,6 +24,8 @@ import { EncryptionService } from '../../common/services/encryption.service';
 import { EventsGateway } from '../events/events.gateway';
 import { OpenPhoneProvider } from '../communication/providers/openphone.provider';
 import { IdempotencyService } from './idempotency.service';
+import { OutboundWebhooksService } from './outbound-webhooks.service';
+import { WebhookEventType } from '../../database/entities/webhook-subscription.entity';
 
 export interface OpenPhoneMessageObject {
   id: string;
@@ -85,6 +87,7 @@ export class WebhooksService {
     private eventsGateway: EventsGateway,
     private openPhoneProvider: OpenPhoneProvider,
     private idempotencyService: IdempotencyService,
+    private outboundWebhooksService: OutboundWebhooksService,
   ) {}
 
   async getWorkspaceByWebhookId(webhookId: string): Promise<Workspace | null> {
@@ -414,6 +417,19 @@ export class WebhooksService {
         lastMessageAt: message.createdAt,
       });
     }
+
+    // Emit outbound webhook to subscriptions (fire and forget)
+    const webhookEventType = message.direction === MessageDirection.IN
+      ? WebhookEventType.MESSAGE_INBOUND
+      : message.status === MessageStatus.DELIVERED
+        ? WebhookEventType.MESSAGE_DELIVERED
+        : WebhookEventType.MESSAGE_SENT;
+
+    this.outboundWebhooksService
+      .emitMessageEvent(workspaceId, webhookEventType, message)
+      .catch((err) => {
+        this.logger.error(`Failed to emit outbound webhook for OpenPhone message: ${err.message}`);
+      });
   }
 
   private async handleCallCompletedEvent(
@@ -554,6 +570,31 @@ export class WebhooksService {
         contactName,
       });
     }
+
+    // Emit outbound webhook for call event (fire and forget)
+    const callWebhookEvent = call.status === CallStatus.MISSED
+      ? WebhookEventType.CALL_MISSED
+      : WebhookEventType.CALL_COMPLETED;
+
+    this.outboundWebhooksService
+      .emitEvent(workspaceId, callWebhookEvent, {
+        callId: call.id,
+        conversationId: conversation.id,
+        direction: call.direction,
+        duration: call.duration,
+        fromNumber: call.fromNumber,
+        toNumber: call.toNumber,
+        providerCallId: call.providerCallId,
+        status: call.status,
+        recordingUrl: call.recordingUrl,
+        voicemailUrl: call.voicemailUrl,
+        startedAt: call.startedAt,
+        endedAt: call.endedAt,
+        createdAt: call.createdAt,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to emit outbound webhook for OpenPhone call: ${err.message}`);
+      });
   }
 
   private async handleVoicemailEvent(
