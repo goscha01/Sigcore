@@ -575,7 +575,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
   /**
    * Get the most recent conversations from OpenPhone.
-   * Single API call: GET /conversations?maxResults=N&updatedAfter=7d
+   * Single API call: GET /conversations?maxResults=50&updatedAfter=3d
+   * No per-conversation message fetching — uses lastActivityAt for sorting.
    */
   async getRecentConversations(credentialsString: string): Promise<Array<{
     participantPhone: string;
@@ -583,8 +584,6 @@ export class OpenPhoneProvider implements CommunicationProvider {
     phoneNumber: string;
     phoneNumberName: string;
     lastMessageAt: Date;
-    lastMessagePreview: string;
-    lastMessageDirection: string;
     conversationName?: string;
   }>> {
     const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
@@ -592,7 +591,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Fetch all conversations from the past 3 days
+    // Fetch conversations from the past 3 days
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
@@ -611,68 +610,32 @@ export class OpenPhoneProvider implements CommunicationProvider {
       return [];
     }
 
-    const filtered = conversations.filter(conv => {
-      const participants = (conv.participants as string[]) || [];
-      return participants.length > 0;
-    });
-
-    // Fetch latest message for each conversation in parallel batches
-    // This gives us: accurate sort order, message preview, direction
-    const batchSize = 5;
-    const results: Array<{
-      participantPhone: string;
-      phoneNumberId: string;
-      phoneNumber: string;
-      phoneNumberName: string;
-      lastMessageAt: Date;
-      lastMessagePreview: string;
-      lastMessageDirection: string;
-      conversationName?: string;
-    }> = [];
-
-    for (let i = 0; i < filtered.length; i += batchSize) {
-      const batch = filtered.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map(async (conv) => {
+    // Map and sort by lastActivityAt — no extra API calls needed
+    const results = conversations
+      .filter(conv => {
+        const participants = (conv.participants as string[]) || [];
+        return participants.length > 0;
+      })
+      .map(conv => {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
-        const convId = conv.id as string;
-
-        let lastMessageAt = conv.updatedAt ? new Date(conv.updatedAt as string) : new Date();
-        let lastMessagePreview = '';
-        let lastMessageDirection = '';
-
-        try {
-          const msgResponse = await client.get('/messages', {
-            params: { conversationId: convId, maxResults: 1 },
-          });
-          const messages = msgResponse.data.data || [];
-          if (messages.length > 0) {
-            const msg = messages[0];
-            lastMessageAt = new Date(msg.createdAt);
-            lastMessagePreview = msg.text || msg.body || '';
-            lastMessageDirection = msg.direction || '';
-          }
-        } catch {
-          // Use conversation updatedAt as fallback
-        }
 
         return {
           participantPhone: participants[0],
           phoneNumberId,
           phoneNumber: phoneInfo?.number || '',
           phoneNumberName: phoneInfo?.name || '',
-          lastMessageAt,
-          lastMessagePreview,
-          lastMessageDirection,
+          lastMessageAt: conv.lastActivityAt
+            ? new Date(conv.lastActivityAt as string)
+            : new Date(conv.updatedAt as string),
           conversationName: conv.name as string | undefined,
         };
-      }));
-      results.push(...batchResults);
-    }
+      })
+      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
 
-    this.logger.log(`Fetched latest messages for ${results.length} conversations`);
-    return results.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
+    this.logger.log(`Returning ${results.length} conversations sorted by lastActivityAt`);
+    return results;
   }
 
   /**
@@ -742,9 +705,15 @@ export class OpenPhoneProvider implements CommunicationProvider {
       let pageCount = 0;
       let totalContacts = 0;
       const maxPages = 100;
+      const pageDelayMs = 300; // 300ms delay between pages to avoid 429 rate limits
       let loggedSample = false;
 
       do {
+        // Add delay between pages (not before the first page)
+        if (pageCount > 0) {
+          await new Promise(resolve => setTimeout(resolve, pageDelayMs));
+        }
+
         const params: Record<string, unknown> = { maxResults: 50 };
         if (pageToken) params.pageToken = pageToken;
 

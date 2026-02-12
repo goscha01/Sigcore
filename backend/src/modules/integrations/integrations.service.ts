@@ -437,18 +437,25 @@ export class IntegrationsService {
 
     const conversations = await this.openPhoneProvider.getRecentConversations(credentials);
 
-    // Look up contact names for participant phone numbers
-    const participantNumbers = conversations.map(c => c.participantPhone).filter(Boolean);
+    // Only look up contact names for participants that DON'T already have a conversation name
+    const numbersNeedingLookup = conversations
+      .filter(c => c.participantPhone && !c.conversationName)
+      .map(c => c.participantPhone);
 
-    const contactNames = await this.openPhoneProvider.lookupContactNamesByPhone(
-      credentials,
-      participantNumbers,
-    );
+    this.logger.log(`${conversations.length} conversations, ${numbersNeedingLookup.length} need contact name lookup`);
 
-    // Enrich conversations with contact names (use conversation name as fallback)
+    let contactNames = new Map<string, string>();
+    if (numbersNeedingLookup.length > 0) {
+      contactNames = await this.openPhoneProvider.lookupContactNamesByPhone(
+        credentials,
+        numbersNeedingLookup,
+      );
+    }
+
+    // Enrich: use conversationName first, then contact lookup, then null
     return conversations.map(conv => {
-      const contactName = contactNames.get(conv.participantPhone) || conv.conversationName || null;
-      this.logger.log(`Contact mapping: ${conv.participantPhone} -> "${contactName}" (lookup: "${contactNames.get(conv.participantPhone) || 'none'}", convName: "${conv.conversationName || 'none'}")`);
+      const contactName = conv.conversationName || contactNames.get(conv.participantPhone) || null;
+      this.logger.log(`Contact mapping: ${conv.participantPhone} -> "${contactName}" (convName: "${conv.conversationName || 'none'}", lookup: "${contactNames.get(conv.participantPhone) || 'none'}")`);
       return {
         ...conv,
         contactName,
