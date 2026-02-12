@@ -58,7 +58,6 @@ export default function AdminTenantsPage() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
-  const [copiedSecret, setCopiedSecret] = useState<string | null>(null);
 
   const apiUrl = `${window.location.origin}/api`;
 
@@ -303,30 +302,6 @@ export default function AdminTenantsPage() {
                       </div>
                       <code className="text-xs font-mono text-blue-800 mt-1 block">{apiUrl}</code>
                     </div>
-
-                    {/* Webhook Secret */}
-                    {tenant.webhookSecret && (
-                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Key className="h-4 w-4 text-amber-500" />
-                            <span className="text-sm font-medium text-amber-900">Webhook Secret</span>
-                          </div>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(tenant.webhookSecret!);
-                              setCopiedSecret(tenant.id);
-                              setTimeout(() => setCopiedSecret(null), 2000);
-                            }}
-                            className={`p-1 rounded ${copiedSecret === tenant.id ? 'text-green-600' : 'text-amber-500 hover:bg-amber-100'}`}
-                            title="Copy webhook secret"
-                          >
-                            {copiedSecret === tenant.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </button>
-                        </div>
-                        <code className="text-xs font-mono text-amber-800 mt-1 block break-all">{tenant.webhookSecret}</code>
-                      </div>
-                    )}
 
                     {/* API Keys Section */}
                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
