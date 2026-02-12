@@ -84,6 +84,19 @@ export class IntegrationsService {
   }
 
   /**
+   * Resolve the base URL for webhook registration.
+   * Checks multiple sources: ConfigService, process.env, Railway auto-injected domain.
+   */
+  private getBaseUrl(): string {
+    return (
+      this.configService.get('BASE_URL') ||
+      process.env.BASE_URL ||
+      (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null) ||
+      'http://localhost:3002'
+    );
+  }
+
+  /**
    * Get integration by provider type. If no provider specified, returns the first active integration.
    */
   async getIntegration(workspaceId: string, provider?: ProviderType): Promise<IntegrationInfo | null> {
@@ -119,7 +132,7 @@ export class IntegrationsService {
       where: { id: integration.workspaceId },
     });
 
-    const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+    const baseUrl = this.getBaseUrl();
     const metadata = integration.metadata || {};
 
     // Determine webhook URL based on provider
@@ -171,9 +184,9 @@ export class IntegrationsService {
     // Get or create workspace to construct webhook URL
     const workspace = await this.ensureWorkspace(workspaceId);
 
-    const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+    const baseUrl = this.getBaseUrl();
     const webhookUrl = `${baseUrl}/api/webhooks/openphone/${workspace.webhookId}`;
-    this.logger.log(`Webhook URL for workspace ${workspaceId}: ${webhookUrl} (BASE_URL config=${this.configService.get('BASE_URL')}, env=${process.env.BASE_URL})`);
+    this.logger.log(`Webhook URL for workspace ${workspaceId}: ${webhookUrl} (BASE_URL config=${this.configService.get('BASE_URL')}, env=${process.env.BASE_URL}, railway=${process.env.RAILWAY_PUBLIC_DOMAIN})`);
 
     let integration = await this.integrationRepo.findOne({
       where: { workspaceId, provider: dto.provider },
@@ -265,7 +278,7 @@ export class IntegrationsService {
     // Get or create workspace to construct webhook URL
     const workspace = await this.ensureWorkspace(workspaceId);
 
-    const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+    const baseUrl = this.getBaseUrl();
     const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspace.webhookId}`;
     const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
@@ -481,7 +494,7 @@ export class IntegrationsService {
     });
 
     if (workspace && dto.phoneNumberSid) {
-      const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+      const baseUrl = this.getBaseUrl();
       const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspace.webhookId}`;
       const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
@@ -676,7 +689,7 @@ export class IntegrationsService {
     const decrypted = this.encryptionService.decrypt(integration.credentialsEncrypted);
     const credentials = JSON.parse(decrypted);
 
-    const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+    const baseUrl = this.getBaseUrl();
     const expectedWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
     // Get current webhook URL from Twilio
@@ -736,7 +749,7 @@ export class IntegrationsService {
     const decrypted = this.encryptionService.decrypt(integration.credentialsEncrypted);
     const credentials = JSON.parse(decrypted);
 
-    const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || 'http://localhost:3002';
+    const baseUrl = this.getBaseUrl();
     const voiceWebhookUrl = `${baseUrl}/api/webhooks/twilio/voice/${workspace.webhookId}`;
 
     this.logger.log(`Updating TwiML App ${credentials.voiceTwimlAppSid} webhook to: ${voiceWebhookUrl}`);

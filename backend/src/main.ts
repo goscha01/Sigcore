@@ -95,8 +95,9 @@ async function bootstrap() {
   const port = configService.get('PORT') || 3002;
   await app.listen(port, '0.0.0.0');
 
-  const baseUrl = configService.get('BASE_URL') || process.env.BASE_URL || '(not set)';
-  console.log(`Sigcore Backend running on port ${port}, BASE_URL=${baseUrl} (config=${configService.get('BASE_URL')}, env=${process.env.BASE_URL})`);
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  const baseUrl = configService.get('BASE_URL') || process.env.BASE_URL || (railwayDomain ? `https://${railwayDomain}` : null) || '(not set)';
+  console.log(`Sigcore Backend running on port ${port}, BASE_URL=${baseUrl} (config=${configService.get('BASE_URL')}, env=${process.env.BASE_URL}, railway=${railwayDomain})`);
 }
 
 bootstrap();

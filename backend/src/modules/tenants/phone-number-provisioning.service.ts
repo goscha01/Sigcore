@@ -201,7 +201,7 @@ export class PhoneNumberProvisioningService {
       };
 
       // Configure webhooks on the new number
-      const baseUrl = this.configService.get('BASE_URL');
+      const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null);
       if (baseUrl) {
         // Use workspaceId as the webhookId for Twilio webhooks
         const smsWebhookUrl = `${baseUrl}/api/webhooks/twilio/sms/${workspaceId}`;

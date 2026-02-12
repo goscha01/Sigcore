@@ -103,7 +103,7 @@ export class TwilioProvider implements CommunicationProvider {
       };
 
       // Add status callback URL for delivery notifications
-      const baseUrl = this.configService.get('BASE_URL');
+      const baseUrl = this.configService.get('BASE_URL') || process.env.BASE_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null);
       if (baseUrl) {
         messageParams.statusCallback = `${baseUrl}/api/webhooks/twilio/sms/status`;
         this.logger.log(`Using status callback URL: ${messageParams.statusCallback}`);

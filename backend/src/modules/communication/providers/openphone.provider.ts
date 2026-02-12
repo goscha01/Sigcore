@@ -646,7 +646,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     // Step 2: Sort by lastActivityAt and only check top candidates with /messages.
     // This avoids making hundreds of API calls — we only verify the most likely candidates.
-    const candidateLimit = Math.max(limit * 5, 50);
+    // Use 100 candidates: 50 worked without rate limits (~6s), 100 gives better coverage
+    // for conversations with stale lastActivityAt (OpenPhone's known issue).
+    const candidateLimit = Math.max(limit * 10, 100);
     const candidates = recentConversations
       .sort((a, b) => {
         const dateA = a.lastActivityAt ? new Date(a.lastActivityAt as string).getTime() : 0;
