@@ -11,9 +11,33 @@ import {
   ChevronDown,
   ChevronUp,
   Key,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 import type { Tenant, TenantApiKeyInfo } from '../../types';
+
+const STORED_KEYS_KEY = 'tenantApiFullKeys';
+
+function loadStoredKeys(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(STORED_KEYS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredKey(keyId: string, fullKey: string) {
+  const stored = loadStoredKeys();
+  stored[keyId] = fullKey;
+  localStorage.setItem(STORED_KEYS_KEY, JSON.stringify(stored));
+}
+
+function removeStoredKey(keyId: string) {
+  const stored = loadStoredKeys();
+  delete stored[keyId];
+  localStorage.setItem(STORED_KEYS_KEY, JSON.stringify(stored));
+}
 
 export default function AdminTenantsPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -27,9 +51,10 @@ export default function AdminTenantsPage() {
   const [expandedTenantId, setExpandedTenantId] = useState<string | null>(null);
 
   const [tenantApiKeys, setTenantApiKeys] = useState<Record<string, TenantApiKeyInfo[]>>({});
-  const [newKeyFullValue, setNewKeyFullValue] = useState<string | null>(null);
+  const [fullKeys, setFullKeys] = useState<Record<string, string>>(loadStoredKeys);
+  const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -91,9 +116,10 @@ export default function AdminTenantsPage() {
   const handleGenerateApiKey = async (tenantId: string) => {
     try {
       setGeneratingKey(true);
-      setNewKeyFullValue(null);
       const result = await adminApi.createTenantApiKey(tenantId, 'Portal Key');
-      setNewKeyFullValue(result.key);
+      saveStoredKey(result.id, result.key);
+      setFullKeys(loadStoredKeys());
+      setRevealedKeyId(result.id);
       await loadTenantApiKeys(tenantId);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to generate API key');
@@ -106,17 +132,25 @@ export default function AdminTenantsPage() {
     if (!confirm('Are you sure? The tenant will lose access to the portal.')) return;
     try {
       await adminApi.deleteTenantApiKey(tenantId, keyId);
+      removeStoredKey(keyId);
+      setFullKeys(loadStoredKeys());
+      setRevealedKeyId(null);
       await loadTenantApiKeys(tenantId);
-      setNewKeyFullValue(null);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to revoke API key');
     }
   };
 
+  const handleCopyKey = (keyId: string, fullKey: string) => {
+    navigator.clipboard.writeText(fullKey);
+    setCopiedKeyId(keyId);
+    setTimeout(() => setCopiedKeyId(null), 2000);
+  };
+
   const handleToggleExpand = (tenantId: string) => {
     const isExpanding = expandedTenantId !== tenantId;
     setExpandedTenantId(isExpanding ? tenantId : null);
-    setNewKeyFullValue(null);
+    setRevealedKeyId(null);
     if (isExpanding) {
       loadTenantApiKeys(tenantId);
     }
@@ -246,58 +280,69 @@ export default function AdminTenantsPage() {
                       Portal API Keys
                     </h4>
 
-                    {newKeyFullValue && (
-                      <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <p className="text-xs font-medium text-green-800 mb-1">
-                          API key generated! Copy it now — it won't be shown again.
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <code className="text-xs font-mono bg-white px-2 py-1 rounded border border-green-200 flex-1 break-all">
-                            {newKeyFullValue}
-                          </code>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(newKeyFullValue);
-                              setCopiedKey(true);
-                              setTimeout(() => setCopiedKey(false), 2000);
-                            }}
-                            className="flex-shrink-0 p-1 text-green-700 hover:bg-green-100 rounded"
-                            title="Copy"
-                          >
-                            {copiedKey ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </button>
-                        </div>
-                        <p className="text-xs text-green-700 mt-2">
-                          Portal URL: <code className="bg-white px-1 rounded">{window.location.origin}/portal/login</code>
-                        </p>
-                      </div>
-                    )}
-
                     {(tenantApiKeys[tenant.id] || []).length > 0 ? (
                       <div className="space-y-2">
-                        {(tenantApiKeys[tenant.id] || []).map((k) => (
-                          <div key={k.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <Key className="h-4 w-4 text-gray-400" />
-                              <div>
-                                <span className="text-sm font-medium text-gray-900">{k.name}</span>
-                                <div className="text-xs text-gray-500 font-mono">{k.keyPreview}</div>
-                                {k.lastUsedAt && (
-                                  <span className="text-xs text-gray-400">
-                                    Last used: {new Date(k.lastUsedAt).toLocaleDateString()}
-                                  </span>
-                                )}
+                        {(tenantApiKeys[tenant.id] || []).map((k) => {
+                          const hasFullKey = !!fullKeys[k.id];
+                          const isRevealed = revealedKeyId === k.id;
+                          const isCopied = copiedKeyId === k.id;
+
+                          return (
+                            <div key={k.id} className={`p-3 rounded-lg ${isRevealed ? 'bg-green-50 border border-green-200' : 'bg-gray-50'}`}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <Key className={`h-4 w-4 ${isRevealed ? 'text-green-500' : 'text-gray-400'}`} />
+                                  <div>
+                                    <span className="text-sm font-medium text-gray-900">{k.name}</span>
+                                    <div className="text-xs text-gray-500 font-mono">{k.keyPreview}</div>
+                                    {k.lastUsedAt && (
+                                      <span className="text-xs text-gray-400">
+                                        Last used: {new Date(k.lastUsedAt).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {hasFullKey && (
+                                    <button
+                                      onClick={() => setRevealedKeyId(isRevealed ? null : k.id)}
+                                      className={`p-1 rounded ${isRevealed ? 'text-green-700 hover:bg-green-100' : 'text-gray-400 hover:bg-gray-100'}`}
+                                      title={isRevealed ? 'Hide key' : 'Show key'}
+                                    >
+                                      {isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                    </button>
+                                  )}
+                                  {hasFullKey && (
+                                    <button
+                                      onClick={() => handleCopyKey(k.id, fullKeys[k.id])}
+                                      className={`p-1 rounded ${isCopied ? 'text-green-600' : 'text-gray-400 hover:bg-gray-100'}`}
+                                      title="Copy full key"
+                                    >
+                                      {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleRevokeApiKey(tenant.id, k.id)}
+                                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                    title="Revoke key"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
                               </div>
+                              {isRevealed && hasFullKey && (
+                                <div className="mt-2 pl-7">
+                                  <code className="text-xs font-mono bg-white px-2 py-1 rounded border border-green-200 block break-all">
+                                    {fullKeys[k.id]}
+                                  </code>
+                                  <p className="text-xs text-green-700 mt-1">
+                                    Portal URL: <code className="bg-white px-1 rounded">{window.location.origin}/portal/login</code>
+                                  </p>
+                                </div>
+                              )}
                             </div>
-                            <button
-                              onClick={() => handleRevokeApiKey(tenant.id, k.id)}
-                              className="p-1 text-red-500 hover:bg-red-50 rounded text-xs"
-                              title="Revoke key"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-sm text-gray-500">
