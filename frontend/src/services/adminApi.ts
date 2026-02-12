@@ -237,6 +237,17 @@ class AdminApiService {
     const response = await this.client.get<ApiResponse<any[]>>(`/integrations/openphone/test-conversations?limit=${limit}`);
     return response.data.data;
   }
+
+  // ==================== Conversations (from DB) ====================
+
+  async getConversations(options?: { page?: number; limit?: number; provider?: string }): Promise<{ conversations: any[]; meta: any }> {
+    const params = new URLSearchParams();
+    if (options?.page) params.append('page', String(options.page));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.provider) params.append('provider', options.provider);
+    const response = await this.client.get<{ data: any[]; meta: any }>(`/conversations?${params.toString()}`);
+    return { conversations: response.data.data, meta: response.data.meta };
+  }
 }
 
 export const adminApi = new AdminApiService();
