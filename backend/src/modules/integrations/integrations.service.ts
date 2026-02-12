@@ -507,8 +507,10 @@ export class IntegrationsService {
 
   /**
    * Delete integration by provider.
+   * Returns a result object instead of throwing on not-found,
+   * so callers (like Callio) always get a JSON response.
    */
-  async deleteIntegration(workspaceId: string, provider?: ProviderType): Promise<void> {
+  async deleteIntegration(workspaceId: string, provider?: ProviderType): Promise<{ success: boolean; error?: string }> {
     const whereClause: { workspaceId: string; provider?: ProviderType } = { workspaceId };
     if (provider) {
       whereClause.provider = provider;
@@ -519,7 +521,8 @@ export class IntegrationsService {
     });
 
     if (!integration) {
-      throw new NotFoundException('Integration not found');
+      this.logger.log(`No integration found for workspace ${workspaceId} (provider=${provider || 'any'}) — nothing to delete`);
+      return { success: true }; // Idempotent: already deleted is still success
     }
 
     // Delete webhooks based on provider
@@ -541,6 +544,8 @@ export class IntegrationsService {
     // Note: For Twilio, webhooks are configured on the phone number and will remain until the number is released
 
     await this.integrationRepo.remove(integration);
+    this.logger.log(`Deleted ${integration.provider} integration for workspace ${workspaceId}`);
+    return { success: true };
   }
 
   async getWebhookSecret(workspaceId: string, provider?: ProviderType): Promise<string | null> {

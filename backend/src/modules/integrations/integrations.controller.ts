@@ -71,12 +71,13 @@ export class IntegrationsController {
   }
 
   @Delete()
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   async deleteIntegration(
     @WorkspaceId() workspaceId: string,
     @Query('provider') provider?: ProviderType,
   ) {
-    await this.integrationsService.deleteIntegration(workspaceId, provider);
+    const result = await this.integrationsService.deleteIntegration(workspaceId, provider);
+    return { data: result };
   }
 
   // ==================== OPENPHONE-SPECIFIC ENDPOINTS ====================
@@ -123,9 +124,10 @@ export class IntegrationsController {
    * DELETE /integrations/openphone/disconnect
    */
   @Delete('openphone/disconnect')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   async disconnectOpenPhone(@WorkspaceId() workspaceId: string) {
-    await this.integrationsService.deleteIntegration(workspaceId, ProviderType.OPENPHONE);
+    const result = await this.integrationsService.deleteIntegration(workspaceId, ProviderType.OPENPHONE);
+    return { data: result };
   }
 
   // ==================== TWILIO-SPECIFIC ENDPOINTS ====================
@@ -163,9 +165,10 @@ export class IntegrationsController {
   }
 
   @Delete('twilio')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   async deleteTwilioIntegration(@WorkspaceId() workspaceId: string) {
-    await this.integrationsService.deleteIntegration(workspaceId, ProviderType.TWILIO);
+    const result = await this.integrationsService.deleteIntegration(workspaceId, ProviderType.TWILIO);
+    return { data: result };
   }
 
   // ==================== SYNC ENDPOINTS ====================
