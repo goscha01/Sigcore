@@ -577,7 +577,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
    * Get the most recent conversations from OpenPhone.
    * Single API call: GET /conversations?maxResults=N&updatedAfter=7d
    */
-  async getRecentConversationsByMessages(credentialsString: string, limit: number = 10): Promise<Array<{
+  async getRecentConversations(credentialsString: string): Promise<Array<{
     participantPhone: string;
     phoneNumberId: string;
     phoneNumber: string;
@@ -590,36 +590,27 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
     const client = this.createClient(credentials.apiKey);
 
-    // Get phone number details for display names
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Use progressively wider time windows to find enough recent conversations.
-    // Start narrow (1 day) — if not enough results, widen to 3d then 7d.
-    const windows = [1, 3, 7];
+    // Fetch all conversations from the past 3 days
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
     let conversations: Array<Record<string, unknown>> = [];
-
     try {
-      for (const days of windows) {
-        const after = new Date();
-        after.setDate(after.getDate() - days);
-
-        const response = await client.get('/conversations', {
-          params: {
-            maxResults: 50,
-            updatedAfter: after.toISOString(),
-          },
-        });
-        conversations = response.data.data || [];
-        this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=${days}d)`);
-
-        if (conversations.length >= limit) break;
-      }
+      const response = await client.get('/conversations', {
+        params: {
+          maxResults: 50,
+          updatedAfter: threeDaysAgo.toISOString(),
+        },
+      });
+      conversations = response.data.data || [];
+      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=3d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    // Sort by updatedAt (most reliable recency indicator), then take top N
     return conversations
       .filter(conv => {
         const participants = (conv.participants as string[]) || [];
@@ -629,7 +620,6 @@ export class OpenPhoneProvider implements CommunicationProvider {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
-        // Use updatedAt as primary sort key — lastActivityAt can be stale
         const updatedAt = conv.updatedAt ? new Date(conv.updatedAt as string) : new Date();
 
         return {
@@ -637,14 +627,13 @@ export class OpenPhoneProvider implements CommunicationProvider {
           phoneNumberId,
           phoneNumber: phoneInfo?.number || '',
           phoneNumberName: phoneInfo?.name || '',
-          lastMessageAt: updatedAt, // Use updatedAt for sorting (more reliable)
+          lastMessageAt: updatedAt,
           lastMessagePreview: '',
           lastMessageDirection: '',
           conversationName: conv.name as string | undefined,
         };
       })
-      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
-      .slice(0, limit);
+      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
   }
 
   /**

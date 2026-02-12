@@ -110,12 +110,12 @@ export class IntegrationsController {
   }
 
   /**
-   * Test: Get last 3 conversations from OpenPhone (not stored, just returned)
+   * Get conversations from the past 3 days from OpenPhone
    * GET /integrations/openphone/test-conversations
    */
   @Get('openphone/test-conversations')
-  async testOpenPhoneConversations(@WorkspaceId() workspaceId: string, @Query('limit') limit?: string) {
-    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId, limit ? parseInt(limit) : 10);
+  async testOpenPhoneConversations(@WorkspaceId() workspaceId: string) {
+    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId);
     return { data: conversations };
   }
 

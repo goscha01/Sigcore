@@ -424,7 +424,7 @@ export class IntegrationsService {
     }));
   }
 
-  async testOpenPhoneConversations(workspaceId: string, limit: number = 10): Promise<any> {
+  async testOpenPhoneConversations(workspaceId: string): Promise<any> {
     const integration = await this.integrationRepo.findOne({
       where: { workspaceId, provider: ProviderType.OPENPHONE },
     });
@@ -435,9 +435,7 @@ export class IntegrationsService {
 
     const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
 
-    // Use messages-based approach to get truly recent conversations
-    // The /conversations endpoint has stale lastActivityAt values
-    const conversations = await this.openPhoneProvider.getRecentConversationsByMessages(credentials, limit);
+    const conversations = await this.openPhoneProvider.getRecentConversations(credentials);
 
     // Look up contact names for participant phone numbers
     const participantNumbers = conversations.map(c => c.participantPhone).filter(Boolean);
