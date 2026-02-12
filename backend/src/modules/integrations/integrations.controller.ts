@@ -114,7 +114,7 @@ export class IntegrationsController {
    */
   @Get('openphone/test-conversations')
   async testOpenPhoneConversations(@WorkspaceId() workspaceId: string, @Query('limit') limit?: string) {
-    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId, limit ? parseInt(limit) : 3);
+    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId, limit ? parseInt(limit) : 10);
     return { data: conversations };
   }
 

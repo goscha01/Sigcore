@@ -636,21 +636,12 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     this.logger.log(`Total conversations fetched: ${allConversations.length}`);
 
-    // Sort by lastActivityAt descending as a rough guide for candidate selection
-    allConversations.sort((a, b) => {
-      const aTime = a.lastActivityAt ? new Date(a.lastActivityAt as string).getTime() : 0;
-      const bTime = b.lastActivityAt ? new Date(b.lastActivityAt as string).getTime() : 0;
-      return bTime - aTime;
-    });
+    // Step 2: Fetch the latest message for EVERY conversation (not just a subset)
+    // to get accurate timestamps — OpenPhone's lastActivityAt is stale and unreliable.
+    // Process in batches of 5 for concurrency without overwhelming the API.
+    this.logger.log(`Processing ALL ${allConversations.length} conversations to find top ${limit} by actual message time`);
 
-    // Verify top candidates with /messages to get actual last message timestamps
-    // Check more candidates than needed since lastActivityAt ordering is unreliable
-    const candidateLimit = Math.min(allConversations.length, Math.max(limit * 10, 50));
-    const candidates = allConversations.slice(0, candidateLimit);
-    this.logger.log(`Processing ${candidates.length} candidate conversations to find top ${limit} by actual message time`);
-
-    // Step 2: For each candidate, fetch the latest message to get accurate timestamp
-    const results: Array<{
+    type ConvResult = {
       participantPhone: string;
       phoneNumberId: string;
       phoneNumber: string;
@@ -659,70 +650,84 @@ export class OpenPhoneProvider implements CommunicationProvider {
       lastMessagePreview: string;
       lastMessageDirection: string;
       conversationName?: string;
-    }> = [];
+    };
 
-    for (const conv of candidates) {
-      const participants = (conv.participants as string[]) || [];
-      const phoneNumberId = conv._phoneNumberId as string;
-      const phoneInfo = phoneNumberMap.get(phoneNumberId);
+    const results: ConvResult[] = [];
+    const BATCH_SIZE = 5;
 
-      if (!participants.length || !phoneInfo) continue;
+    for (let i = 0; i < allConversations.length; i += BATCH_SIZE) {
+      const batch = allConversations.slice(i, i + BATCH_SIZE);
 
-      try {
-        const response = await client.get('/messages', {
-          params: {
-            phoneNumberId,
-            participants,
-            limit: 1,
-          },
-        });
-        const messages = response.data.data || [];
+      const batchPromises = batch.map(async (conv): Promise<ConvResult | null> => {
+        const participants = (conv.participants as string[]) || [];
+        const phoneNumberId = conv._phoneNumberId as string;
+        const phoneInfo = phoneNumberMap.get(phoneNumberId);
 
-        if (messages.length > 0) {
-          const latestMsg = messages[0];
-          const direction = latestMsg.direction as string;
-          const msgDate = new Date(latestMsg.createdAt as string);
-          let preview = (latestMsg.content as string || latestMsg.text as string || latestMsg.body as string || '').substring(0, 100);
-          if (!preview) {
-            const media = latestMsg.media as Array<{ type?: string; url?: string }> | undefined;
-            if (media && media.length > 0) {
-              preview = `[${media[0]?.type || 'Media'}]`;
-            } else if (latestMsg.type === 'call') {
-              preview = '[Call]';
-            } else {
-              this.logger.log(`Empty message preview - raw msg keys: ${Object.keys(latestMsg).join(', ')}, type: ${latestMsg.type}, object: ${latestMsg.object}`);
-              preview = latestMsg.type ? `[${latestMsg.type}]` : '(no content)';
+        if (!participants.length || !phoneInfo) return null;
+
+        try {
+          const response = await client.get('/messages', {
+            params: {
+              phoneNumberId,
+              participants,
+              limit: 1,
+            },
+          });
+          const messages = response.data.data || [];
+
+          if (messages.length > 0) {
+            const latestMsg = messages[0];
+            const direction = latestMsg.direction as string;
+            const msgDate = new Date(latestMsg.createdAt as string);
+            let preview = (latestMsg.content as string || latestMsg.text as string || latestMsg.body as string || '').substring(0, 100);
+            if (!preview) {
+              const media = latestMsg.media as Array<{ type?: string; url?: string }> | undefined;
+              if (media && media.length > 0) {
+                preview = `[${media[0]?.type || 'Media'}]`;
+              } else if (latestMsg.type === 'call') {
+                preview = '[Call]';
+              } else {
+                preview = latestMsg.type ? `[${latestMsg.type}]` : '(no content)';
+              }
             }
-          }
 
-          results.push({
+            return {
+              participantPhone: participants[0],
+              phoneNumberId,
+              phoneNumber: phoneInfo.number,
+              phoneNumberName: phoneInfo.name || '',
+              lastMessageAt: msgDate,
+              lastMessagePreview: preview,
+              lastMessageDirection: direction,
+              conversationName: conv.name as string | undefined,
+            };
+          }
+          return null;
+        } catch (error: any) {
+          // Fallback to lastActivityAt from /conversations
+          const fallbackDate = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(0);
+          return {
             participantPhone: participants[0],
             phoneNumberId,
             phoneNumber: phoneInfo.number,
             phoneNumberName: phoneInfo.name || '',
-            lastMessageAt: msgDate,
-            lastMessagePreview: preview,
-            lastMessageDirection: direction,
+            lastMessageAt: fallbackDate,
+            lastMessagePreview: '(unable to fetch latest message)',
+            lastMessageDirection: 'unknown',
             conversationName: conv.name as string | undefined,
-          });
+          };
         }
-      } catch (error: any) {
-        // Fallback to lastActivityAt from /conversations
-        const fallbackDate = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(0);
-        results.push({
-          participantPhone: participants[0],
-          phoneNumberId,
-          phoneNumber: phoneInfo.number,
-          phoneNumberName: phoneInfo.name || '',
-          lastMessageAt: fallbackDate,
-          lastMessagePreview: '(unable to fetch latest message)',
-          lastMessageDirection: 'unknown',
-          conversationName: conv.name as string | undefined,
-        });
-        this.logger.warn(`Failed to fetch messages for conversation ${conv.id}: ${error.message}`);
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      for (const r of batchResults) {
+        if (r) results.push(r);
       }
 
-      if (results.length >= candidateLimit) break;
+      // Log progress every 50 conversations
+      if ((i + BATCH_SIZE) % 50 === 0 || i + BATCH_SIZE >= allConversations.length) {
+        this.logger.log(`Checked ${Math.min(i + BATCH_SIZE, allConversations.length)}/${allConversations.length} conversations`);
+      }
     }
 
     // Sort by actual message time and return top N

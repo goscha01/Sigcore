@@ -120,6 +120,8 @@ export default function AdminIntegrationTestPage() {
         if (conversations.length > 10) conversations.pop();
       }
 
+      persistConversations(conversations);
+
       return {
         ...prev,
         message: `${conversations.length} conversations (live)`,
@@ -148,6 +150,8 @@ export default function AdminIntegrationTestPage() {
         conversations.unshift(conv);
       }
 
+      persistConversations(conversations);
+
       return { ...prev, data: conversations };
     });
   };
@@ -175,6 +179,8 @@ export default function AdminIntegrationTestPage() {
       });
       if (conversations.length > 10) conversations.pop();
 
+      persistConversations(conversations);
+
       return {
         ...prev,
         message: `${conversations.length} conversations (live)`,
@@ -183,34 +189,10 @@ export default function AdminIntegrationTestPage() {
     });
   };
 
-  // Map DB conversation shape to UI shape
-  const mapDbConversations = (dbConversations: any[]) =>
-    dbConversations.map((c: any) => ({
-      participantPhone: c.participantPhoneNumber,
-      phoneNumber: c.phoneNumber,
-      phoneNumberName: c.phoneNumberName || '',
-      lastMessageAt: c.lastMessageAt,
-      lastMessagePreview: c.lastMessage || '(no messages yet)',
-      lastMessageDirection: null, // DB doesn't track direction of last message
-      contactName: c.contactName || null,
-    }));
-
-  // Load conversations from DB
-  const loadConversationsFromDb = async () => {
-    try {
-      const result = await adminApi.getConversations({ limit: 10, provider: 'openphone' });
-      if (result.conversations.length > 0) {
-        setOpenPhoneConversationsTest({
-          status: 'success',
-          message: `${result.conversations.length} conversations (from DB)`,
-          data: mapDbConversations(result.conversations),
-        });
-        return true;
-      }
-    } catch {
-      // DB fetch failed — ignore
-    }
-    return false;
+  // Persist conversations to localStorage
+  const persistConversations = (conversations: any[]) => {
+    localStorage.setItem('openphone_conversations', JSON.stringify(conversations));
+    localStorage.setItem('openphone_conversations_updated', new Date().toISOString());
   };
 
   // Auto-load integrations and restore conversations on mount
@@ -221,30 +203,32 @@ export default function AdminIntegrationTestPage() {
         setIntegrationsData(integrations);
         connectSocket();
 
-        // If OpenPhone is connected, load conversations from DB
+        // If OpenPhone is connected, load conversations from localStorage
         const hasOpenPhone = Array.isArray(integrations)
           ? integrations.some((i: any) => i.provider === 'openphone' && i.status === 'active')
           : false;
 
         if (hasOpenPhone) {
-          setOpenPhoneConversationsTest({ status: 'loading' });
+          const stored = localStorage.getItem('openphone_conversations');
+          const storedTime = localStorage.getItem('openphone_conversations_updated');
 
-          // 1. Load from DB immediately (fast)
-          const hadData = await loadConversationsFromDb();
-
-          // 2. Trigger incremental sync in background, then refresh from DB
-          try {
-            await adminApi.startSync({ provider: 'openphone', limit: 10 });
-            // Give sync a moment to process, then refresh from DB
-            setTimeout(async () => {
-              await loadConversationsFromDb();
-            }, 3000);
-          } catch {
-            // Sync failed — we still have DB data
-          }
-
-          if (!hadData) {
-            setOpenPhoneConversationsTest({ status: 'success', message: 'No conversations synced yet. Click "Test Conversations" to sync.', data: [] });
+          if (stored) {
+            try {
+              const conversations = JSON.parse(stored);
+              const timeLabel = storedTime
+                ? `cached ${new Date(storedTime).toLocaleString()}`
+                : 'cached';
+              setOpenPhoneConversationsTest({
+                status: 'success',
+                message: `${conversations.length} conversations (${timeLabel})`,
+                data: conversations,
+              });
+            } catch {
+              localStorage.removeItem('openphone_conversations');
+              setOpenPhoneConversationsTest({ status: 'success', message: 'No cached conversations. Click "Fetch Conversations" to load.', data: [] });
+            }
+          } else {
+            setOpenPhoneConversationsTest({ status: 'success', message: 'No cached conversations. Click "Fetch Conversations" to load.', data: [] });
           }
         }
       } catch {
@@ -273,18 +257,11 @@ export default function AdminIntegrationTestPage() {
       localStorage.setItem('test_openphone_api_key', openPhoneApiKey);
       setConnectionResult({
         status: 'success',
-        message: 'OpenPhone connected successfully! Syncing recent conversations...',
+        message: 'OpenPhone connected successfully! Click "Fetch Conversations" to load.',
         data: result,
       });
       loadIntegrations();
-      // Trigger initial sync to pull recent conversations into DB
-      try {
-        await adminApi.startSync({ provider: 'openphone', limit: 10 });
-        // Load from DB after a brief delay for sync to process
-        setTimeout(() => loadConversationsFromDb(), 5000);
-      } catch {
-        // Sync failed — not critical, user can sync manually
-      }
+      connectSocket();
     } catch (err: any) {
       setConnectionResult({
         status: 'error',
@@ -344,38 +321,26 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
-  // Sync & load OpenPhone Conversations (sync from API into DB, then load from DB)
+  // Fetch top 10 conversations directly from OpenPhone API (no DB)
   const testOpenPhoneConversations = async () => {
-    setOpenPhoneConversationsTest({ status: 'loading', message: 'Syncing conversations from OpenPhone...' });
+    setOpenPhoneConversationsTest({ status: 'loading', message: 'Fetching conversations from OpenPhone...' });
     try {
-      // Trigger sync to pull ALL conversations from OpenPhone into DB (no limit)
-      await adminApi.startSync({ provider: 'openphone' });
+      const conversations = await adminApi.testOpenPhoneConversations(10);
 
-      // Poll sync status until done (max 120s — full sync can take a while)
-      let done = false;
-      for (let i = 0; i < 60 && !done; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        try {
-          const status = await adminApi.getSyncStatus();
-          if (status.status !== 'running') done = true;
-        } catch {
-          done = true; // No status endpoint or error — assume done
-        }
-      }
+      // Save to localStorage
+      localStorage.setItem('openphone_conversations', JSON.stringify(conversations));
+      localStorage.setItem('openphone_conversations_updated', new Date().toISOString());
 
-      // Load all conversations from DB
-      const result = await adminApi.getConversations({ limit: 500, provider: 'openphone' });
       setOpenPhoneConversationsTest({
         status: 'success',
-        message: `${result.conversations.length} conversations (synced & stored in DB)`,
-        data: mapDbConversations(result.conversations),
+        message: `${conversations.length} conversations (from OpenPhone)`,
+        data: conversations,
       });
-      // Ensure Socket.IO is connected for live updates
       connectSocket();
     } catch (err: any) {
       setOpenPhoneConversationsTest({
         status: 'error',
-        message: err.response?.data?.message || err.message || 'Failed to sync OpenPhone conversations',
+        message: err.response?.data?.message || err.message || 'Failed to fetch OpenPhone conversations',
       });
     }
   };

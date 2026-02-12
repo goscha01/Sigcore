@@ -411,7 +411,7 @@ export class IntegrationsService {
     }));
   }
 
-  async testOpenPhoneConversations(workspaceId: string, limit: number = 3): Promise<any> {
+  async testOpenPhoneConversations(workspaceId: string, limit: number = 10): Promise<any> {
     const integration = await this.integrationRepo.findOne({
       where: { workspaceId, provider: ProviderType.OPENPHONE },
     });
