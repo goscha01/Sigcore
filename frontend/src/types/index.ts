@@ -6,6 +6,7 @@ export interface Tenant {
   externalId: string;
   name: string;
   status: 'active' | 'inactive' | 'suspended';
+  webhookSecret?: string;
   metadata?: Record<string, unknown>;
   phoneNumbers?: TenantPhoneNumber[];
   createdAt: string;

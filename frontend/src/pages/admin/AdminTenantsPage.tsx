@@ -58,6 +58,7 @@ export default function AdminTenantsPage() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedSecret, setCopiedSecret] = useState<string | null>(null);
 
   const apiUrl = `${window.location.origin}/api`;
 
@@ -303,6 +304,30 @@ export default function AdminTenantsPage() {
                       <code className="text-xs font-mono text-blue-800 mt-1 block">{apiUrl}</code>
                     </div>
 
+                    {/* Webhook Secret */}
+                    {tenant.webhookSecret && (
+                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Key className="h-4 w-4 text-amber-500" />
+                            <span className="text-sm font-medium text-amber-900">Webhook Secret</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(tenant.webhookSecret!);
+                              setCopiedSecret(tenant.id);
+                              setTimeout(() => setCopiedSecret(null), 2000);
+                            }}
+                            className={`p-1 rounded ${copiedSecret === tenant.id ? 'text-green-600' : 'text-amber-500 hover:bg-amber-100'}`}
+                            title="Copy webhook secret"
+                          >
+                            {copiedSecret === tenant.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <code className="text-xs font-mono text-amber-800 mt-1 block break-all">{tenant.webhookSecret}</code>
+                      </div>
+                    )}
+
                     {/* API Keys Section */}
                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                       <Key className="h-4 w-4" />
@@ -412,8 +437,8 @@ export default function AdminTenantsPage() {
                           <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`POST ${apiUrl}/integrations/openphone/connect\n{ "apiKey": "<openphone-api-key>" }\n\nPOST ${apiUrl}/integrations/twilio\n{ "accountSid": "...", "authToken": "...", "phoneNumber": "..." }`}</pre>
                         </li>
                         <li>
-                          Register a webhook to receive events:
-                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`POST ${apiUrl}/webhook-subscriptions\n{\n  "name": "${tenant.name} Webhook",\n  "webhookUrl": "https://<tenant-domain>/webhooks/sigcore",\n  "secret": "<shared-secret>",\n  "events": ["message.inbound", "message.sent",\n    "call.completed", "call.missed"]\n}`}</pre>
+                          Register a webhook to receive events (secret is auto-filled from tenant record):
+                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`POST ${apiUrl}/webhook-subscriptions\n{\n  "name": "${tenant.name} Webhook",\n  "webhookUrl": "https://<tenant-domain>/webhooks/sigcore",\n  "events": ["message.inbound", "message.sent",\n    "call.completed", "call.missed"]\n}`}</pre>
                         </li>
                       </ol>
                     </div>

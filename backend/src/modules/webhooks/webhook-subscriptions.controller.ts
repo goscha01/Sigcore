@@ -11,9 +11,12 @@ import {
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { OutboundWebhooksService } from './outbound-webhooks.service';
 import { SigcoreAuthGuard } from '../auth/sigcore-auth.guard';
-import { WorkspaceId } from '../auth/decorators/workspace-id.decorator';
+import { WorkspaceId, TenantId } from '../auth/decorators/workspace-id.decorator';
+import { Tenant } from '../../database/entities';
 import {
   WebhookEventType,
   WebhookSubscriptionStatus,
@@ -75,7 +78,11 @@ class UpdateWebhookSubscriptionDto {
 @Controller('webhook-subscriptions')
 @UseGuards(SigcoreAuthGuard)
 export class WebhookSubscriptionsController {
-  constructor(private readonly outboundWebhooksService: OutboundWebhooksService) {}
+  constructor(
+    private readonly outboundWebhooksService: OutboundWebhooksService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
+  ) {}
 
   /**
    * List all webhook subscriptions
@@ -117,8 +124,16 @@ export class WebhookSubscriptionsController {
   @HttpCode(HttpStatus.CREATED)
   async createSubscription(
     @WorkspaceId() workspaceId: string,
+    @TenantId() tenantId: string | undefined,
     @Body() dto: CreateWebhookSubscriptionDto,
   ) {
+    // Auto-fill secret from tenant record if not provided
+    if (!dto.secret && tenantId) {
+      const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+      if (tenant?.webhookSecret) {
+        dto.secret = tenant.webhookSecret;
+      }
+    }
     const subscription = await this.outboundWebhooksService.createSubscription(workspaceId, dto);
     return { data: subscription };
   }
@@ -165,6 +180,25 @@ export class WebhookSubscriptionsController {
   }
 
   /**
+   * Get the tenant's webhook secret
+   * Tenants use this to retrieve their signing secret for verifying inbound webhooks.
+   */
+  @Get('secret')
+  async getWebhookSecret(
+    @WorkspaceId() workspaceId: string,
+    @TenantId() tenantId: string | undefined,
+  ) {
+    if (!tenantId) {
+      throw new NotFoundException('Webhook secret is only available for tenant API key auth');
+    }
+    const tenant = await this.tenantRepo.findOne({ where: { id: tenantId, workspaceId } });
+    if (!tenant?.webhookSecret) {
+      throw new NotFoundException('No webhook secret configured for this tenant');
+    }
+    return { data: { secret: tenant.webhookSecret } };
+  }
+
+  /**
    * Get available event types
    */
   @Get('events/types')
@@ -197,7 +231,11 @@ export class WebhookSubscriptionsController {
 @Controller('v1/webhook-subscriptions')
 @UseGuards(SigcoreAuthGuard)
 export class WebhookSubscriptionsV1Controller {
-  constructor(private readonly outboundWebhooksService: OutboundWebhooksService) {}
+  constructor(
+    private readonly outboundWebhooksService: OutboundWebhooksService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
+  ) {}
 
   @Get()
   async listSubscriptions(@WorkspaceId() workspaceId: string) {
@@ -209,8 +247,16 @@ export class WebhookSubscriptionsV1Controller {
   @HttpCode(HttpStatus.CREATED)
   async createSubscription(
     @WorkspaceId() workspaceId: string,
+    @TenantId() tenantId: string | undefined,
     @Body() dto: CreateWebhookSubscriptionDto,
   ) {
+    // Auto-fill secret from tenant record if not provided
+    if (!dto.secret && tenantId) {
+      const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+      if (tenant?.webhookSecret) {
+        dto.secret = tenant.webhookSecret;
+      }
+    }
     const subscription = await this.outboundWebhooksService.createSubscription(workspaceId, dto);
     return { data: subscription };
   }
@@ -244,5 +290,20 @@ export class WebhookSubscriptionsV1Controller {
   ) {
     const result = await this.outboundWebhooksService.testSubscription(workspaceId, id);
     return { data: result };
+  }
+
+  @Get('secret')
+  async getWebhookSecret(
+    @WorkspaceId() workspaceId: string,
+    @TenantId() tenantId: string | undefined,
+  ) {
+    if (!tenantId) {
+      throw new NotFoundException('Webhook secret is only available for tenant API key auth');
+    }
+    const tenant = await this.tenantRepo.findOne({ where: { id: tenantId, workspaceId } });
+    if (!tenant?.webhookSecret) {
+      throw new NotFoundException('No webhook secret configured for this tenant');
+    }
+    return { data: { secret: tenant.webhookSecret } };
   }
 }

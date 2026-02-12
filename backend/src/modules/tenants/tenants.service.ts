@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as crypto from 'crypto';
 import {
   Tenant,
   TenantStatus,
@@ -107,6 +108,7 @@ export class TenantsService {
       externalId,
       name: dto.name,
       status: TenantStatus.ACTIVE,
+      webhookSecret: crypto.randomBytes(32).toString('hex'),
       metadata: dto.metadata,
     });
 
