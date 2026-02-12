@@ -348,12 +348,12 @@ export default function AdminIntegrationTestPage() {
   const testOpenPhoneConversations = async () => {
     setOpenPhoneConversationsTest({ status: 'loading', message: 'Syncing conversations from OpenPhone...' });
     try {
-      // Trigger sync to pull latest from OpenPhone into DB
-      await adminApi.startSync({ provider: 'openphone', limit: 10 });
+      // Trigger sync to pull ALL conversations from OpenPhone into DB (no limit)
+      await adminApi.startSync({ provider: 'openphone' });
 
-      // Poll sync status until done (max 30s)
+      // Poll sync status until done (max 120s — full sync can take a while)
       let done = false;
-      for (let i = 0; i < 15 && !done; i++) {
+      for (let i = 0; i < 60 && !done; i++) {
         await new Promise(r => setTimeout(r, 2000));
         try {
           const status = await adminApi.getSyncStatus();
@@ -363,8 +363,8 @@ export default function AdminIntegrationTestPage() {
         }
       }
 
-      // Load from DB
-      const result = await adminApi.getConversations({ limit: 10, provider: 'openphone' });
+      // Load all conversations from DB
+      const result = await adminApi.getConversations({ limit: 500, provider: 'openphone' });
       setOpenPhoneConversationsTest({
         status: 'success',
         message: `${result.conversations.length} conversations (synced & stored in DB)`,
