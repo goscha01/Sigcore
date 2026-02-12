@@ -611,29 +611,68 @@ export class OpenPhoneProvider implements CommunicationProvider {
       return [];
     }
 
-    return conversations
-      .filter(conv => {
-        const participants = (conv.participants as string[]) || [];
-        return participants.length > 0;
-      })
-      .map(conv => {
+    const filtered = conversations.filter(conv => {
+      const participants = (conv.participants as string[]) || [];
+      return participants.length > 0;
+    });
+
+    // Fetch latest message for each conversation in parallel batches
+    // This gives us: accurate sort order, message preview, direction
+    const batchSize = 5;
+    const results: Array<{
+      participantPhone: string;
+      phoneNumberId: string;
+      phoneNumber: string;
+      phoneNumberName: string;
+      lastMessageAt: Date;
+      lastMessagePreview: string;
+      lastMessageDirection: string;
+      conversationName?: string;
+    }> = [];
+
+    for (let i = 0; i < filtered.length; i += batchSize) {
+      const batch = filtered.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map(async (conv) => {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
-        const updatedAt = conv.updatedAt ? new Date(conv.updatedAt as string) : new Date();
+        const convId = conv.id as string;
+
+        let lastMessageAt = conv.updatedAt ? new Date(conv.updatedAt as string) : new Date();
+        let lastMessagePreview = '';
+        let lastMessageDirection = '';
+
+        try {
+          const msgResponse = await client.get('/messages', {
+            params: { conversationId: convId, maxResults: 1 },
+          });
+          const messages = msgResponse.data.data || [];
+          if (messages.length > 0) {
+            const msg = messages[0];
+            lastMessageAt = new Date(msg.createdAt);
+            lastMessagePreview = msg.text || msg.body || '';
+            lastMessageDirection = msg.direction || '';
+          }
+        } catch {
+          // Use conversation updatedAt as fallback
+        }
 
         return {
           participantPhone: participants[0],
           phoneNumberId,
           phoneNumber: phoneInfo?.number || '',
           phoneNumberName: phoneInfo?.name || '',
-          lastMessageAt: updatedAt,
-          lastMessagePreview: '',
-          lastMessageDirection: '',
+          lastMessageAt,
+          lastMessagePreview,
+          lastMessageDirection,
           conversationName: conv.name as string | undefined,
         };
-      })
-      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
+      }));
+      results.push(...batchResults);
+    }
+
+    this.logger.log(`Fetched latest messages for ${results.length} conversations`);
+    return results.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
   }
 
   /**
