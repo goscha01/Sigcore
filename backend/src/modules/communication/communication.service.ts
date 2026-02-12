@@ -338,7 +338,7 @@ export class CommunicationService {
         participantPhoneNumbers: conv.participantPhoneNumbers || null,
         participantContacts,
         contactId: conv.contactId || null,
-        contactName: (metadata.conversationName as string) || null,
+        contactName: (metadata.contactName as string) || (metadata.conversationName as string) || null,
         lastMessage: lastMessage?.body || (metadata.lastMessagePreview as string) || null,
         lastMessageAt: lastMessageAt,
         unreadCount: metadata.unreadCount as number || 0,
@@ -1238,8 +1238,23 @@ export class CommunicationService {
       }
       this.logger.log(`Found ${participantPhones.size / 2} unique participant phone numbers`)
 
-      // Contact data now lives in Callio service - skip contact sync
-      this.logger.log(`Skipping contact sync (contacts live in Callio) for ${conversations.length} conversations`);
+      // Look up contact names from OpenPhone for all participant phone numbers
+      let contactNameMap = new Map<string, string>();
+      if (participantPhones.size > 0) {
+        try {
+          this.updateProgress(workspaceId, {
+            phase: 'Looking up contacts',
+            message: 'Fetching contact names from OpenPhone...',
+          });
+          contactNameMap = await (provider as any).lookupContactNamesByPhone(
+            credentials,
+            Array.from(participantPhones),
+          );
+          this.logger.log(`Contact name lookup: found ${contactNameMap.size} name mappings`);
+        } catch (err: any) {
+          this.logger.warn(`Contact name lookup failed: ${err.message}`);
+        }
+      }
 
       const total = conversations.length;
       this.updateProgress(workspaceId, {
@@ -1290,8 +1305,17 @@ export class CommunicationService {
             conversation.participantPhoneNumbers = convData.participantPhoneNumbers;
           }
 
-          // Contact data now lives in Callio service - skip contact linking/creation
-          // Keep existing contactId if present on the conversation
+          // Enrich metadata with contact name from OpenPhone contacts
+          if (convData.participantPhoneNumber && contactNameMap.size > 0) {
+            const name = contactNameMap.get(convData.participantPhoneNumber)
+              || contactNameMap.get('+' + convData.participantPhoneNumber)
+              || contactNameMap.get(convData.participantPhoneNumber.replace(/^\+/, ''));
+            if (name) {
+              const meta = conversation.metadata as Record<string, unknown> || {};
+              meta.contactName = name;
+              conversation.metadata = meta;
+            }
+          }
 
           const savedConv = await this.conversationRepo.save(conversation);
           this.logger.log(`Saved conversation: id=${savedConv.id}, externalId=${savedConv.externalId}, phoneNumber='${savedConv.phoneNumber}', participant=${savedConv.participantPhoneNumber}`);
