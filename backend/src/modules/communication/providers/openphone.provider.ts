@@ -593,41 +593,34 @@ export class OpenPhoneProvider implements CommunicationProvider {
     // Get phone number details for display names
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Paginate through ALL conversations updated in the last 7 days
-    // The API returns at most 50 per page in arbitrary order,
-    // so we must fetch all pages to find the truly most recent ones.
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    let allConversations: Array<Record<string, unknown>> = [];
-    let pageToken: string | null = null;
-    let pageCount = 0;
-    const maxPages = 20; // Safety limit (20 * 50 = 1000 conversations max)
+    // Use progressively wider time windows to find enough recent conversations.
+    // Start narrow (1 day) — if not enough results, widen to 3d then 7d.
+    const windows = [1, 3, 7];
+    let conversations: Array<Record<string, unknown>> = [];
 
     try {
-      do {
-        const params: Record<string, unknown> = {
-          maxResults: 50,
-          updatedAfter: sevenDaysAgo.toISOString(),
-        };
-        if (pageToken) params.pageToken = pageToken;
+      for (const days of windows) {
+        const after = new Date();
+        after.setDate(after.getDate() - days);
 
-        const response = await client.get('/conversations', { params });
-        const pageData = response.data.data || [];
-        allConversations = allConversations.concat(pageData);
+        const response = await client.get('/conversations', {
+          params: {
+            maxResults: 50,
+            updatedAfter: after.toISOString(),
+          },
+        });
+        conversations = response.data.data || [];
+        this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=${days}d)`);
 
-        pageToken = response.data.nextPageToken || null;
-        pageCount++;
-      } while (pageToken && pageCount < maxPages);
-
-      this.logger.log(`Fetched ${allConversations.length} conversations across ${pageCount} pages (updatedAfter=7d)`);
+        if (conversations.length >= limit) break;
+      }
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    // Map, sort by updatedAt (most reliable recency indicator), then take top N
-    return allConversations
+    // Sort by updatedAt (most reliable recency indicator), then take top N
+    return conversations
       .filter(conv => {
         const participants = (conv.participants as string[]) || [];
         return participants.length > 0;
