@@ -10,6 +10,19 @@ async function bootstrap() {
 
   const logger = new Logger('HTTP');
 
+  // Ensure all API responses have Content-Type: application/json
+  // (prevents double-encoding when downstream consumers like Callio don't get the header)
+  app.use('/api', (req: any, res: any, next: () => void) => {
+    const originalJson = res.json.bind(res);
+    res.json = (body: unknown) => {
+      if (!res.getHeader('content-type')) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      }
+      return originalJson(body);
+    };
+    next();
+  });
+
   // Request/Response logging middleware
   app.use((req: { method: string; originalUrl: string; body: unknown }, res: { statusCode: number; on: (event: string, cb: () => void) => void }, next: () => void) => {
     const startTime = Date.now();
