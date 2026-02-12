@@ -644,9 +644,19 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     this.logger.log(`Total recent conversations: ${recentConversations.length}`);
 
-    // Step 2: For each recent conversation, fetch latest message to get accurate timestamp.
-    // Since we already filtered to recent + active, this is a small set (typically 20-50).
-    // Process in batches of 5 for concurrency.
+    // Step 2: Sort by lastActivityAt and only check top candidates with /messages.
+    // This avoids making hundreds of API calls — we only verify the most likely candidates.
+    const candidateLimit = Math.max(limit * 5, 50);
+    const candidates = recentConversations
+      .sort((a, b) => {
+        const dateA = a.lastActivityAt ? new Date(a.lastActivityAt as string).getTime() : 0;
+        const dateB = b.lastActivityAt ? new Date(b.lastActivityAt as string).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, candidateLimit);
+
+    this.logger.log(`Checking top ${candidates.length} candidates (of ${recentConversations.length} total) for actual messages`);
+
     type ConvResult = {
       participantPhone: string;
       phoneNumberId: string;
@@ -661,8 +671,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const results: ConvResult[] = [];
     const BATCH_SIZE = 5;
 
-    for (let i = 0; i < recentConversations.length; i += BATCH_SIZE) {
-      const batch = recentConversations.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+      const batch = candidates.slice(i, i + BATCH_SIZE);
 
       const batchPromises = batch.map(async (conv): Promise<ConvResult | null> => {
         const participants = (conv.participants as string[]) || [];
@@ -672,13 +682,27 @@ export class OpenPhoneProvider implements CommunicationProvider {
         if (!participants.length || !phoneInfo) return null;
 
         try {
-          const response = await client.get('/messages', {
-            params: {
-              phoneNumberId,
-              participants,
-              maxResults: 1,
-            },
-          });
+          // Fetch latest message with retry on 429 rate limits
+          let response: any;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              response = await client.get('/messages', {
+                params: {
+                  phoneNumberId,
+                  participants,
+                  maxResults: 1,
+                },
+              });
+              break;
+            } catch (retryErr: any) {
+              if (retryErr?.response?.status === 429 && attempt < 2) {
+                const retryAfter = parseInt(retryErr.response.headers?.['retry-after'] || '2', 10);
+                await new Promise(r => setTimeout(r, retryAfter * 1000));
+                continue;
+              }
+              throw retryErr;
+            }
+          }
           const messages = response.data.data || [];
 
           if (messages.length > 0) {
