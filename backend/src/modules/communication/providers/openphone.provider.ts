@@ -593,29 +593,41 @@ export class OpenPhoneProvider implements CommunicationProvider {
     // Get phone number details for display names
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Single API call: fetch recent conversations sorted by last activity
+    // Paginate through ALL conversations updated in the last 7 days
+    // The API returns at most 50 per page in arbitrary order,
+    // so we must fetch all pages to find the truly most recent ones.
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Fetch more than needed — API doesn't guarantee sort by recency
-    const fetchLimit = Math.max(limit * 5, 50);
-    let conversations: Array<Record<string, unknown>> = [];
+    let allConversations: Array<Record<string, unknown>> = [];
+    let pageToken: string | null = null;
+    let pageCount = 0;
+    const maxPages = 20; // Safety limit (20 * 50 = 1000 conversations max)
+
     try {
-      const response = await client.get('/conversations', {
-        params: {
-          maxResults: fetchLimit,
+      do {
+        const params: Record<string, unknown> = {
+          maxResults: 50,
           updatedAfter: sevenDaysAgo.toISOString(),
-        },
-      });
-      conversations = response.data.data || [];
-      this.logger.log(`Fetched ${conversations.length} conversations (maxResults=${fetchLimit}, updatedAfter=7d)`);
+        };
+        if (pageToken) params.pageToken = pageToken;
+
+        const response = await client.get('/conversations', { params });
+        const pageData = response.data.data || [];
+        allConversations = allConversations.concat(pageData);
+
+        pageToken = response.data.nextPageToken || null;
+        pageCount++;
+      } while (pageToken && pageCount < maxPages);
+
+      this.logger.log(`Fetched ${allConversations.length} conversations across ${pageCount} pages (updatedAfter=7d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    // Map, sort by most recent activity, then take top N
-    return conversations
+    // Map, sort by updatedAt (most reliable recency indicator), then take top N
+    return allConversations
       .filter(conv => {
         const participants = (conv.participants as string[]) || [];
         return participants.length > 0;
@@ -624,14 +636,15 @@ export class OpenPhoneProvider implements CommunicationProvider {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
-        const lastActivity = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(conv.updatedAt as string);
+        // Use updatedAt as primary sort key — lastActivityAt can be stale
+        const updatedAt = conv.updatedAt ? new Date(conv.updatedAt as string) : new Date();
 
         return {
           participantPhone: participants[0],
           phoneNumberId,
           phoneNumber: phoneInfo?.number || '',
           phoneNumberName: phoneInfo?.name || '',
-          lastMessageAt: lastActivity,
+          lastMessageAt: updatedAt, // Use updatedAt for sorting (more reliable)
           lastMessagePreview: '',
           lastMessageDirection: '',
           conversationName: conv.name as string | undefined,
