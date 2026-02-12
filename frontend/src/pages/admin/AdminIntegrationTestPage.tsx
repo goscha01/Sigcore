@@ -183,15 +183,46 @@ export default function AdminIntegrationTestPage() {
     });
   };
 
-  // Cleanup socket on unmount
+  // Auto-load integrations and restore conversations on mount
   useEffect(() => {
+    const autoRestore = async () => {
+      try {
+        const integrations = await adminApi.getIntegrations();
+        setIntegrationsData(integrations);
+        connectSocket();
+
+        // If OpenPhone is connected, auto-fetch conversations
+        const hasOpenPhone = Array.isArray(integrations)
+          ? integrations.some((i: any) => i.provider === 'openphone' && i.status === 'active')
+          : false;
+
+        if (hasOpenPhone) {
+          setOpenPhoneConversationsTest({ status: 'loading' });
+          try {
+            const conversations = await adminApi.testOpenPhoneConversations(10);
+            setOpenPhoneConversationsTest({
+              status: 'success',
+              message: `Fetched ${conversations.length} conversations from OpenPhone (not stored in DB)`,
+              data: conversations,
+            });
+          } catch {
+            // Silently fail — user can manually fetch
+          }
+        }
+      } catch {
+        // Not authenticated or server not running — ignore
+      }
+    };
+
+    autoRestore();
+
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, []);
+  }, [connectSocket]);
 
   // Connect OpenPhone
   const handleConnectOpenPhone = async (e: React.FormEvent) => {
