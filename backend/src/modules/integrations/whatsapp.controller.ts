@@ -26,20 +26,24 @@ export class WhatsAppController {
 
     if (!session) {
       return {
-        connected: false,
-        status: 'not_initialized',
-        hasQrCode: false,
-        message: 'WhatsApp not connected. Click "Connect" to start.',
+        data: {
+          connected: false,
+          status: 'not_initialized',
+          hasQrCode: false,
+          message: 'WhatsApp not connected. Click "Connect" to start.',
+        },
       };
     }
 
     return {
-      connected: session.status === 'ready',
-      status: session.status,
-      phoneNumber: session.phoneNumber,
-      error: session.error,
-      hasQrCode: session.status === 'qr_ready',
-      message: session.message || this.getStatusMessage(session.status),
+      data: {
+        connected: session.status === 'ready',
+        status: session.status,
+        phoneNumber: session.phoneNumber,
+        error: session.error,
+        hasQrCode: session.status === 'qr_ready',
+        message: session.message || this.getStatusMessage(session.status),
+      },
     };
   }
 
@@ -73,16 +77,20 @@ export class WhatsAppController {
       const session = await this.whatsappProvider.initializeClient(workspaceId);
 
       return {
-        success: session.status !== 'error',
-        status: session.status,
-        message: session.message || 'WhatsApp connection initiated. Please wait for QR code...',
-        error: session.error,
+        data: {
+          success: session.status !== 'error',
+          status: session.status,
+          message: session.message || 'WhatsApp connection initiated. Please wait for QR code...',
+          error: session.error,
+        },
       };
     } catch (error) {
       return {
-        success: false,
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to connect',
+        data: {
+          success: false,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Failed to connect',
+        },
       };
     }
   }
@@ -96,31 +104,29 @@ export class WhatsAppController {
 
     if (result.error && result.status === 'error') {
       return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
-        error: result.error,
-        status: 'error',
+        data: { error: result.error, status: 'error' },
       });
     }
 
     if (result.connected) {
       return res.status(HttpStatus.OK).json({
-        connected: true,
-        phoneNumber: result.phoneNumber,
-        status: result.status,
-        message: result.message || 'Already connected',
+        data: {
+          connected: true,
+          phoneNumber: result.phoneNumber,
+          status: result.status,
+          message: result.message || 'Already connected',
+        },
       });
     }
 
     if (result.qrCode) {
       return res.status(HttpStatus.OK).json({
-        qrCode: result.qrCode,
-        status: result.status,
+        data: { qrCode: result.qrCode, status: result.status },
       });
     }
 
     return res.status(HttpStatus.OK).json({
-      status: result.status,
-      message: result.message,
-      error: result.error,
+      data: { status: result.status, message: result.message, error: result.error },
     });
   }
 
@@ -132,8 +138,10 @@ export class WhatsAppController {
     const success = await this.whatsappProvider.disconnect(workspaceId);
 
     return {
-      success,
-      message: success ? 'WhatsApp disconnected successfully' : 'Failed to disconnect',
+      data: {
+        success,
+        message: success ? 'WhatsApp disconnected successfully' : 'Failed to disconnect',
+      },
     };
   }
 
@@ -145,8 +153,10 @@ export class WhatsAppController {
     const available = await this.whatsappProvider.isServiceAvailable();
 
     return {
-      available,
-      message: available ? 'WhatsApp service is running' : 'WhatsApp service is not available',
+      data: {
+        available,
+        message: available ? 'WhatsApp service is running' : 'WhatsApp service is not available',
+      },
     };
   }
 
@@ -162,16 +172,18 @@ export class WhatsAppController {
 
     if (!connected) {
       return res.status(HttpStatus.BAD_REQUEST).json({
-        error: 'WhatsApp not connected',
+        data: { error: 'WhatsApp not connected' },
       });
     }
 
     const session = await this.whatsappProvider.getSession(workspaceId);
 
     return res.status(HttpStatus.OK).json({
-      connected: true,
-      phoneNumber: session?.phoneNumber,
-      message: 'WhatsApp is ready to send messages',
+      data: {
+        connected: true,
+        phoneNumber: session?.phoneNumber,
+        message: 'WhatsApp is ready to send messages',
+      },
     });
   }
 }

@@ -490,12 +490,11 @@ export class TenantsController {
 }
 
 /**
- * LeadBridge Tenants API (API Key Auth - for external systems)
- * Allows external systems to query tenant information
+ * Tenants V1 API (API Key Auth - for external systems / tenant self-service)
  */
 @Controller('v1/tenants')
 @UseGuards(SigcoreAuthGuard)
-export class LeadBridgeTenantsController {
+export class TenantsV1Controller {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly provisioningService: PhoneNumberProvisioningService,

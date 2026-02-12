@@ -8,7 +8,7 @@ import { ApiKey } from '../../database/entities';
  * Guard for Sigcore service-to-service authentication.
  * Supports two auth methods:
  * 1. X-Sigcore-Key header - for Callio backend → Sigcore calls (requires X-Workspace-Id)
- * 2. x-api-key header - for external API key auth (LeadBridge, tenants)
+ * 2. x-api-key header - for external API key auth (tenants, external systems)
  */
 @Injectable()
 export class SigcoreAuthGuard implements CanActivate {

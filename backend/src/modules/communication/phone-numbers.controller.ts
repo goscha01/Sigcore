@@ -22,7 +22,7 @@ import { WorkspaceId } from '../auth/decorators/workspace-id.decorator';
 /**
  * Phone Number Management API
  *
- * Endpoints for managing phone numbers for LeadBridge integration
+ * Endpoints for managing phone numbers
  */
 @Controller('phone-numbers')
 @UseGuards(SigcoreAuthGuard)
@@ -117,7 +117,7 @@ export class PhoneNumbersController {
     @Body() dto: ReleasePhoneNumberDto,
   ) {
     const result = await this.phoneNumbersService.releasePhoneNumber(workspaceId, dto);
-    return result;
+    return { data: result };
   }
 }
 
@@ -168,6 +168,6 @@ export class PhoneNumbersV1Controller {
     @Body() dto: ReleasePhoneNumberDto,
   ) {
     const result = await this.phoneNumbersService.releasePhoneNumber(workspaceId, dto);
-    return result;
+    return { data: result };
   }
 }
