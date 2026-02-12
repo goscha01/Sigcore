@@ -597,22 +597,24 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    // Fetch more than needed — API doesn't guarantee sort by recency
+    const fetchLimit = Math.max(limit * 5, 50);
     let conversations: Array<Record<string, unknown>> = [];
     try {
       const response = await client.get('/conversations', {
         params: {
-          maxResults: limit,
+          maxResults: fetchLimit,
           updatedAfter: sevenDaysAgo.toISOString(),
         },
       });
       conversations = response.data.data || [];
-      this.logger.log(`Fetched ${conversations.length} conversations (maxResults=${limit}, updatedAfter=7d)`);
+      this.logger.log(`Fetched ${conversations.length} conversations (maxResults=${fetchLimit}, updatedAfter=7d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    // Map to result format using conversation data directly
+    // Map, sort by most recent activity, then take top N
     return conversations
       .filter(conv => {
         const participants = (conv.participants as string[]) || [];
@@ -634,7 +636,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
           lastMessageDirection: '',
           conversationName: conv.name as string | undefined,
         };
-      });
+      })
+      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
+      .slice(0, limit);
   }
 
   /**
