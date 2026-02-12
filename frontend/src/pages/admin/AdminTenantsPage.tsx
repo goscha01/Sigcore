@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   Link,
+  FileText,
 } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 import type { Tenant, TenantApiKeyInfo } from '../../types';
@@ -390,6 +391,32 @@ export default function AdminTenantsPage() {
                       )}
                       Generate API Key
                     </button>
+
+                    {/* Setup Instructions */}
+                    <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                      <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Tenant Setup Instructions
+                      </h4>
+                      <ol className="text-xs text-gray-600 space-y-2 list-decimal list-inside">
+                        <li>
+                          Add these environment variables to the tenant&apos;s backend <code className="bg-white px-1 py-0.5 rounded border text-gray-800">.env</code>:
+                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`SIGCORE_URL=${apiUrl}\nSIGCORE_API_KEY=<paste the API key above>`}</pre>
+                        </li>
+                        <li>
+                          All API requests must include the header:
+                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`x-api-key: <tenant API key>`}</pre>
+                        </li>
+                        <li>
+                          Connect integrations via API:
+                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`POST ${apiUrl}/integrations/openphone/connect\n{ "apiKey": "<openphone-api-key>" }\n\nPOST ${apiUrl}/integrations/twilio\n{ "accountSid": "...", "authToken": "...", "phoneNumber": "..." }`}</pre>
+                        </li>
+                        <li>
+                          Register a webhook to receive events:
+                          <pre className="mt-1 ml-4 bg-white p-2 rounded border text-gray-800 font-mono whitespace-pre-wrap">{`POST ${apiUrl}/webhook-subscriptions\n{\n  "name": "${tenant.name} Webhook",\n  "webhookUrl": "https://<tenant-domain>/webhooks/sigcore",\n  "secret": "<shared-secret>",\n  "events": ["message.inbound", "message.sent",\n    "call.completed", "call.missed"]\n}`}</pre>
+                        </li>
+                      </ol>
+                    </div>
                   </div>
                 )}
               </div>
