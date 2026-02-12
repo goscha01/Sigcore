@@ -593,72 +593,38 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const credentials = JSON.parse(credentialsString) as OpenPhoneCredentials;
     const client = this.createClient(credentials.apiKey);
 
-    // Get all phone numbers for this workspace
+    // Get phone number details for display names
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Step 1: Fetch only RECENTLY UPDATED conversations using API filters
-    // instead of paginating through every conversation ever created.
-    // Use updatedAfter (30 days) + excludeInactive to get a small, relevant set.
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const updatedAfter = thirtyDaysAgo.toISOString();
+    // Single API call: fetch the most recent conversations across all phone numbers.
+    // The response includes phoneNumberId on each conversation, so no per-phone filtering needed.
+    const fetchCount = Math.max(limit * 3, 20);
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const recentConversations: Array<Record<string, unknown>> = [];
-
-    for (const [phoneNumberId] of phoneNumberMap) {
-      let pageToken: string | null = null;
-      let pageCount = 0;
-      const maxPages = 10; // 10 pages × 100 = 1,000 recent conversations max per phone (plenty)
-
-      try {
-        do {
-          const params: Record<string, unknown> = {
-            phoneNumbers: [phoneNumberId],
-            maxResults: 100,
-            updatedAfter,
-            excludeInactive: true,
-          };
-          if (pageToken) params.pageToken = pageToken;
-
-          const response = await client.get('/conversations', { params });
-          const conversations = response.data.data || [];
-          for (const conv of conversations) {
-            conv._phoneNumberId = phoneNumberId;
-          }
-          recentConversations.push(...conversations);
-
-          pageToken = response.data.nextPageToken || null;
-          pageCount++;
-        } while (pageToken && pageCount < maxPages);
-
-        this.logger.log(`Fetched ${recentConversations.length} recent conversations for phone ${phoneNumberId} (${pageCount} pages, updatedAfter=${updatedAfter})`);
-      } catch (error: any) {
-        this.logger.warn(`Failed to fetch conversations for phone ${phoneNumberId}: ${error.message}`);
-      }
-    }
-
-    if (recentConversations.length === 0) {
-      this.logger.warn('No recent conversations found');
+    let recentConversations: Array<Record<string, unknown>> = [];
+    try {
+      const response = await client.get('/conversations', {
+        params: {
+          maxResults: fetchCount,
+          updatedAfter: sevenDaysAgo.toISOString(),
+          excludeInactive: true,
+        },
+      });
+      recentConversations = response.data.data || [];
+      this.logger.log(`Fetched ${recentConversations.length} recent conversations (maxResults=${fetchCount}, updatedAfter=7d)`);
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    this.logger.log(`Total recent conversations: ${recentConversations.length}`);
+    if (recentConversations.length === 0) {
+      this.logger.warn('No conversations found in the last 7 days');
+      return [];
+    }
 
-    // Step 2: Sort by lastActivityAt and only check top candidates with /messages.
-    // This avoids making hundreds of API calls — we only verify the most likely candidates.
-    // Use 100 candidates: 50 worked without rate limits (~6s), 100 gives better coverage
-    // for conversations with stale lastActivityAt (OpenPhone's known issue).
-    const candidateLimit = Math.max(limit * 10, 100);
-    const candidates = recentConversations
-      .sort((a, b) => {
-        const dateA = a.lastActivityAt ? new Date(a.lastActivityAt as string).getTime() : 0;
-        const dateB = b.lastActivityAt ? new Date(b.lastActivityAt as string).getTime() : 0;
-        return dateB - dateA;
-      })
-      .slice(0, candidateLimit);
-
-    this.logger.log(`Checking top ${candidates.length} candidates (of ${recentConversations.length} total) for actual messages`);
-
+    // Fetch the latest message for each conversation.
+    // With ~20 conversations and batch size 5, this is ~4 batches — fast and no rate limits.
     type ConvResult = {
       participantPhone: string;
       phoneNumberId: string;
@@ -673,18 +639,17 @@ export class OpenPhoneProvider implements CommunicationProvider {
     const results: ConvResult[] = [];
     const BATCH_SIZE = 5;
 
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-      const batch = candidates.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < recentConversations.length; i += BATCH_SIZE) {
+      const batch = recentConversations.slice(i, i + BATCH_SIZE);
 
       const batchPromises = batch.map(async (conv): Promise<ConvResult | null> => {
         const participants = (conv.participants as string[]) || [];
-        const phoneNumberId = conv._phoneNumberId as string;
+        const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
 
         if (!participants.length || !phoneInfo) return null;
 
         try {
-          // Fetch latest message with retry on 429 rate limits
           let response: any;
           for (let attempt = 0; attempt < 3; attempt++) {
             try {
@@ -736,17 +701,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
           }
           return null;
         } catch (error: any) {
-          const fallbackDate = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(0);
-          return {
-            participantPhone: participants[0],
-            phoneNumberId,
-            phoneNumber: phoneInfo.number,
-            phoneNumberName: phoneInfo.name || '',
-            lastMessageAt: fallbackDate,
-            lastMessagePreview: '(unable to fetch latest message)',
-            lastMessageDirection: 'unknown',
-            conversationName: conv.name as string | undefined,
-          };
+          this.logger.warn(`Failed to fetch messages for conversation with ${(conv.participants as string[])?.[0]}: ${error.message}`);
+          return null;
         }
       });
 
@@ -761,9 +717,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
       .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
       .slice(0, limit);
 
-    this.logger.log(`Found ${results.length} recent conversations with messages, returning top ${sorted.length}`);
+    this.logger.log(`Found ${results.length} conversations with messages, returning top ${sorted.length}`);
     for (const conv of sorted) {
-      this.logger.log(`  Recent: ${conv.participantPhone} | ${conv.lastMessageAt.toISOString()} | ${conv.lastMessageDirection} | "${conv.lastMessagePreview.substring(0, 40)}..."`);
+      this.logger.log(`  ${conv.participantPhone} | ${conv.lastMessageAt.toISOString()} | ${conv.lastMessageDirection} | "${conv.lastMessagePreview.substring(0, 40)}..."`);
     }
 
     return sorted;
