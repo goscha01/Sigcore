@@ -338,8 +338,8 @@ export class CommunicationService {
         participantPhoneNumbers: conv.participantPhoneNumbers || null,
         participantContacts,
         contactId: conv.contactId || null,
-        contactName: null,
-        lastMessage: lastMessage?.body || null,
+        contactName: (metadata.conversationName as string) || null,
+        lastMessage: lastMessage?.body || (metadata.lastMessagePreview as string) || null,
         lastMessageAt: lastMessageAt,
         unreadCount: metadata.unreadCount as number || 0,
       };
