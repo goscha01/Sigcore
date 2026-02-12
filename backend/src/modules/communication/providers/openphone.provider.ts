@@ -574,11 +574,8 @@ export class OpenPhoneProvider implements CommunicationProvider {
   }
 
   /**
-   * Get the most recent conversations using a hybrid approach:
-   * 1. Fetch conversations from /conversations endpoint (gives us participants)
-   * 2. For top candidates, query /messages with participants to get accurate last message time
-   * This works around the stale lastActivityAt issue with /conversations while
-   * satisfying the /messages requirement for a participants array.
+   * Get the most recent conversations from OpenPhone.
+   * Single API call: GET /conversations?maxResults=N&updatedAfter=7d
    */
   async getRecentConversationsByMessages(credentialsString: string, limit: number = 10): Promise<Array<{
     participantPhone: string;
@@ -596,133 +593,48 @@ export class OpenPhoneProvider implements CommunicationProvider {
     // Get phone number details for display names
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Single API call: fetch the most recent conversations across all phone numbers.
-    // The response includes phoneNumberId on each conversation, so no per-phone filtering needed.
-    const fetchCount = Math.max(limit * 3, 20);
+    // Single API call: fetch recent conversations sorted by last activity
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    let recentConversations: Array<Record<string, unknown>> = [];
+    let conversations: Array<Record<string, unknown>> = [];
     try {
       const response = await client.get('/conversations', {
         params: {
-          maxResults: fetchCount,
+          maxResults: limit,
           updatedAfter: sevenDaysAgo.toISOString(),
-          excludeInactive: true,
         },
       });
-      recentConversations = response.data.data || [];
-      this.logger.log(`Fetched ${recentConversations.length} recent conversations (maxResults=${fetchCount}, updatedAfter=7d)`);
+      conversations = response.data.data || [];
+      this.logger.log(`Fetched ${conversations.length} conversations (maxResults=${limit}, updatedAfter=7d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
     }
 
-    if (recentConversations.length === 0) {
-      this.logger.warn('No conversations found in the last 7 days');
-      return [];
-    }
-
-    // Fetch the latest message for each conversation.
-    // With ~20 conversations and batch size 5, this is ~4 batches — fast and no rate limits.
-    type ConvResult = {
-      participantPhone: string;
-      phoneNumberId: string;
-      phoneNumber: string;
-      phoneNumberName: string;
-      lastMessageAt: Date;
-      lastMessagePreview: string;
-      lastMessageDirection: string;
-      conversationName?: string;
-    };
-
-    const results: ConvResult[] = [];
-    const BATCH_SIZE = 5;
-
-    for (let i = 0; i < recentConversations.length; i += BATCH_SIZE) {
-      const batch = recentConversations.slice(i, i + BATCH_SIZE);
-
-      const batchPromises = batch.map(async (conv): Promise<ConvResult | null> => {
+    // Map to result format using conversation data directly
+    return conversations
+      .filter(conv => {
+        const participants = (conv.participants as string[]) || [];
+        return participants.length > 0;
+      })
+      .map(conv => {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
+        const lastActivity = conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(conv.updatedAt as string);
 
-        if (!participants.length || !phoneInfo) return null;
-
-        try {
-          let response: any;
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              response = await client.get('/messages', {
-                params: {
-                  phoneNumberId,
-                  participants,
-                  maxResults: 1,
-                },
-              });
-              break;
-            } catch (retryErr: any) {
-              if (retryErr?.response?.status === 429 && attempt < 2) {
-                const retryAfter = parseInt(retryErr.response.headers?.['retry-after'] || '2', 10);
-                await new Promise(r => setTimeout(r, retryAfter * 1000));
-                continue;
-              }
-              throw retryErr;
-            }
-          }
-          const messages = response.data.data || [];
-
-          if (messages.length > 0) {
-            const latestMsg = messages[0];
-            const direction = latestMsg.direction as string;
-            const msgDate = new Date(latestMsg.createdAt as string);
-            let preview = (latestMsg.content as string || latestMsg.text as string || latestMsg.body as string || '').substring(0, 100);
-            if (!preview) {
-              const media = latestMsg.media as Array<{ type?: string; url?: string }> | undefined;
-              if (media && media.length > 0) {
-                preview = `[${media[0]?.type || 'Media'}]`;
-              } else if (latestMsg.type === 'call') {
-                preview = '[Call]';
-              } else {
-                preview = latestMsg.type ? `[${latestMsg.type}]` : '(no content)';
-              }
-            }
-
-            return {
-              participantPhone: participants[0],
-              phoneNumberId,
-              phoneNumber: phoneInfo.number,
-              phoneNumberName: phoneInfo.name || '',
-              lastMessageAt: msgDate,
-              lastMessagePreview: preview,
-              lastMessageDirection: direction,
-              conversationName: conv.name as string | undefined,
-            };
-          }
-          return null;
-        } catch (error: any) {
-          this.logger.warn(`Failed to fetch messages for conversation with ${(conv.participants as string[])?.[0]}: ${error.message}`);
-          return null;
-        }
+        return {
+          participantPhone: participants[0],
+          phoneNumberId,
+          phoneNumber: phoneInfo?.number || '',
+          phoneNumberName: phoneInfo?.name || '',
+          lastMessageAt: lastActivity,
+          lastMessagePreview: '',
+          lastMessageDirection: '',
+          conversationName: conv.name as string | undefined,
+        };
       });
-
-      const batchResults = await Promise.all(batchPromises);
-      for (const r of batchResults) {
-        if (r) results.push(r);
-      }
-    }
-
-    // Sort by actual message time and return top N
-    const sorted = results
-      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
-      .slice(0, limit);
-
-    this.logger.log(`Found ${results.length} conversations with messages, returning top ${sorted.length}`);
-    for (const conv of sorted) {
-      this.logger.log(`  ${conv.participantPhone} | ${conv.lastMessageAt.toISOString()} | ${conv.lastMessageDirection} | "${conv.lastMessagePreview.substring(0, 40)}..."`);
-    }
-
-    return sorted;
   }
 
   /**
