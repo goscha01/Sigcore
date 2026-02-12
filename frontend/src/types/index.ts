@@ -45,7 +45,7 @@ export interface AvailablePhoneNumber {
 }
 
 export interface CreateTenantDto {
-  externalId: string;
+  externalId?: string;
   name: string;
   metadata?: Record<string, unknown>;
 }

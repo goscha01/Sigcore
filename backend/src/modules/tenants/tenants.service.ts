@@ -22,7 +22,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
 import { ProviderRegistry } from '../communication/providers/provider-registry.service';
 
 export interface CreateTenantDto {
-  externalId: string;
+  externalId?: string;
   name: string;
   metadata?: Record<string, unknown>;
 }
@@ -84,19 +84,27 @@ export class TenantsService {
   /**
    * Create a new tenant
    */
+  private generateExternalId(name: string): string {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const suffix = Math.random().toString(36).substring(2, 6);
+    return `${slug}-${suffix}`;
+  }
+
   async createTenant(workspaceId: string, dto: CreateTenantDto): Promise<Tenant> {
+    const externalId = dto.externalId?.trim() || this.generateExternalId(dto.name);
+
     // Check if tenant with externalId already exists
     const existing = await this.tenantRepo.findOne({
-      where: { workspaceId, externalId: dto.externalId },
+      where: { workspaceId, externalId },
     });
 
     if (existing) {
-      throw new ConflictException(`Tenant with externalId ${dto.externalId} already exists`);
+      throw new ConflictException(`Tenant with externalId ${externalId} already exists`);
     }
 
     const tenant = this.tenantRepo.create({
       workspaceId,
-      externalId: dto.externalId,
+      externalId,
       name: dto.name,
       status: TenantStatus.ACTIVE,
       metadata: dto.metadata,
