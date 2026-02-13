@@ -59,7 +59,7 @@ export default function AdminTenantsPage() {
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
-  const apiUrl = `${window.location.origin}/api`;
+  const apiUrl = import.meta.env.VITE_API_URL || `${window.location.origin}/api`;
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(apiUrl);
