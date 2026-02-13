@@ -97,7 +97,9 @@ export default function AdminIntegrationTestPage() {
       const conversations = [...(prev.data as any[])];
 
       // Determine the participant phone (the external party, not our number)
-      const participantPhone = msg.direction === 'incoming' ? msg.fromNumber : msg.toNumber;
+      // Backend emits direction as 'in'/'out' (DB enum), not 'incoming'/'outgoing'
+      const isIncoming = msg.direction === 'in' || msg.direction === 'incoming' || msg.direction === 'inbound';
+      const participantPhone = isIncoming ? msg.fromNumber : msg.toNumber;
 
       const idx = conversations.findIndex((c: any) =>
         c.participantPhone === participantPhone
@@ -108,18 +110,18 @@ export default function AdminIntegrationTestPage() {
         const conv = { ...conversations[idx] };
         conv.lastMessageAt = msg.createdAt;
         conv.lastMessagePreview = msg.body || '(no text content)';
-        conv.lastMessageDirection = msg.direction;
+        conv.lastMessageDirection = isIncoming ? 'incoming' : 'outgoing';
         conversations.splice(idx, 1);
         conversations.unshift(conv);
       } else {
         // New conversation - add to top, keep max 10
         conversations.unshift({
           participantPhone,
-          phoneNumber: msg.direction === 'incoming' ? msg.toNumber : msg.fromNumber,
+          phoneNumber: isIncoming ? msg.toNumber : msg.fromNumber,
           phoneNumberName: '',
           lastMessageAt: msg.createdAt,
           lastMessagePreview: msg.body || '(no text content)',
-          lastMessageDirection: msg.direction,
+          lastMessageDirection: isIncoming ? 'incoming' : 'outgoing',
           contactName: null,
         });
         if (conversations.length > 10) conversations.pop();
