@@ -80,8 +80,8 @@ export default function AdminApiDocsPage() {
         },
         {
           method: 'GET',
-          path: '/integrations/openphone/test-conversations',
-          description: 'Fetch recent conversations directly from OpenPhone (not stored in DB). Single request using updatedAfter filter, sorted by lastActivityAt. Contact names resolved from OpenPhone contacts for conversations without a name.',
+          path: '/integrations/openphone/conversations',
+          description: 'Fetch recent conversations live from OpenPhone API (not stored in DB). Single request using updatedAfter filter, sorted by lastActivityAt. Contact names resolved from OpenPhone contacts for conversations without a name.',
           auth: 'X-API-Key',
           query: 'days=1',
           response: { data: [{ participantPhone: '+1234567890', phoneNumberId: 'PNxxxxx', phoneNumber: '+0987654321', phoneNumberName: 'Main Line', lastMessageAt: '2026-02-11T...', conversationName: 'John Doe', contactName: 'John Doe' }] },

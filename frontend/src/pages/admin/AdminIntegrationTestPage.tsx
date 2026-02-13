@@ -384,11 +384,11 @@ export default function AdminIntegrationTestPage() {
     }
   };
 
-  // Fetch top 10 conversations directly from OpenPhone API (no DB)
-  const testOpenPhoneConversations = async () => {
+  // Fetch conversations directly from OpenPhone API (no DB)
+  const fetchOpenPhoneConversations = async () => {
     setOpenPhoneConversationsTest({ status: 'loading', message: 'Fetching conversations from OpenPhone...' });
     try {
-      const conversations = await adminApi.testOpenPhoneConversations(conversationDays);
+      const conversations = await adminApi.getOpenPhoneConversations(conversationDays);
 
       // Save to localStorage
       localStorage.setItem('openphone_conversations', JSON.stringify(conversations));
@@ -836,7 +836,7 @@ export default function AdminIntegrationTestPage() {
                     ))}
                   </select>
                   <button
-                    onClick={testOpenPhoneConversations}
+                    onClick={fetchOpenPhoneConversations}
                     disabled={openPhoneConversationsTest.status === 'loading'}
                     className="btn-primary flex items-center gap-2"
                   >
