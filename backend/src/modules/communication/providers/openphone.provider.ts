@@ -597,14 +597,25 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     let conversations: Array<Record<string, unknown>> = [];
     try {
-      const response = await client.get('/conversations', {
-        params: {
+      let pageToken: string | null = null;
+      let pageCount = 0;
+      const maxPages = 20;
+      do {
+        if (pageCount > 0) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        const params: Record<string, unknown> = {
           maxResults: 50,
           updatedAfter: since.toISOString(),
-        },
-      });
-      conversations = response.data.data || [];
-      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=${days}d)`);
+        };
+        if (pageToken) params.pageToken = pageToken;
+        const response = await client.get('/conversations', { params });
+        const page = response.data.data || [];
+        conversations.push(...page);
+        pageToken = response.data.nextPageToken || null;
+        pageCount++;
+      } while (pageToken && pageCount < maxPages);
+      this.logger.log(`Fetched ${conversations.length} conversations across ${pageCount} pages (updatedAfter=${days}d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
