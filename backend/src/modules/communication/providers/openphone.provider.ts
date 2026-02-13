@@ -610,31 +610,66 @@ export class OpenPhoneProvider implements CommunicationProvider {
       return [];
     }
 
-    // Map and sort by lastActivityAt — no extra API calls needed
-    const results = conversations
-      .filter(conv => {
-        const participants = (conv.participants as string[]) || [];
-        return participants.length > 0;
-      })
+    // Filter to conversations with participants
+    const filtered = conversations.filter(conv => {
+      const participants = (conv.participants as string[]) || [];
+      return participants.length > 0;
+    });
+
+    // Fetch the latest message for each conversation to get accurate timestamps.
+    // OpenPhone's lastActivityAt is stale for older conversations.
+    // Process in batches of 5 with 500ms delay between batches to avoid 429 rate limits.
+    const BATCH_SIZE = 5;
+    const BATCH_DELAY_MS = 500;
+    const messageTimestamps = new Map<string, Date>();
+
+    for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+      }
+      const batch = filtered.slice(i, i + BATCH_SIZE);
+      const promises = batch.map(async (conv) => {
+        const convId = conv.id as string;
+        try {
+          const msgResponse = await client.get('/messages', {
+            params: { conversationId: convId, maxResults: 1 },
+          });
+          const messages = msgResponse.data?.data || [];
+          if (messages.length > 0) {
+            messageTimestamps.set(convId, new Date(messages[0].createdAt));
+          }
+        } catch (error: any) {
+          this.logger.warn(`Failed to fetch message for conversation ${convId}: ${error.message}`);
+        }
+      });
+      await Promise.all(promises);
+    }
+
+    this.logger.log(`Fetched latest messages for ${messageTimestamps.size}/${filtered.length} conversations`);
+
+    const results = filtered
       .map(conv => {
         const participants = (conv.participants as string[]) || [];
         const phoneNumberId = conv.phoneNumberId as string;
+        const convId = conv.id as string;
         const phoneInfo = phoneNumberMap.get(phoneNumberId);
+
+        // Use message timestamp if available, fall back to lastActivityAt/updatedAt
+        const lastMessageAt = messageTimestamps.get(convId)
+          || (conv.lastActivityAt ? new Date(conv.lastActivityAt as string) : new Date(conv.updatedAt as string));
 
         return {
           participantPhone: participants[0],
           phoneNumberId,
           phoneNumber: phoneInfo?.number || '',
           phoneNumberName: phoneInfo?.name || '',
-          lastMessageAt: conv.lastActivityAt
-            ? new Date(conv.lastActivityAt as string)
-            : new Date(conv.updatedAt as string),
+          lastMessageAt,
           conversationName: conv.name as string | undefined,
         };
       })
       .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
 
-    this.logger.log(`Returning ${results.length} conversations sorted by lastActivityAt`);
+    this.logger.log(`Returning ${results.length} conversations sorted by actual message timestamps`);
     return results;
   }
 
