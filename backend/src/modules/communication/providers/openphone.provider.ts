@@ -610,8 +610,9 @@ export class OpenPhoneProvider implements CommunicationProvider {
       return [];
     }
 
-    // Filter to conversations with participants
+    // Filter out deleted conversations and those without participants
     const filtered = conversations.filter(conv => {
+      if (conv.deletedAt) return false;
       const participants = (conv.participants as string[]) || [];
       return participants.length > 0;
     });
