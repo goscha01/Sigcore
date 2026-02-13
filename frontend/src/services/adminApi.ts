@@ -243,8 +243,8 @@ class AdminApiService {
     return response.data.data;
   }
 
-  async testOpenPhoneConversations(limit: number = 3): Promise<any[]> {
-    const response = await this.client.get<ApiResponse<any[]>>(`/integrations/openphone/test-conversations?limit=${limit}`);
+  async testOpenPhoneConversations(days: number = 1): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>(`/integrations/openphone/test-conversations?days=${days}`);
     return response.data.data;
   }
 

@@ -424,7 +424,7 @@ export class IntegrationsService {
     }));
   }
 
-  async testOpenPhoneConversations(workspaceId: string): Promise<any> {
+  async testOpenPhoneConversations(workspaceId: string, days: number = 1): Promise<any> {
     const integration = await this.integrationRepo.findOne({
       where: { workspaceId, provider: ProviderType.OPENPHONE },
     });
@@ -435,7 +435,7 @@ export class IntegrationsService {
 
     const credentials = this.encryptionService.decrypt(integration.credentialsEncrypted);
 
-    const conversations = await this.openPhoneProvider.getRecentConversations(credentials);
+    const conversations = await this.openPhoneProvider.getRecentConversations(credentials, days);
 
     // Only look up contact names for participants that DON'T already have a conversation name
     const numbersNeedingLookup = conversations

@@ -110,12 +110,16 @@ export class IntegrationsController {
   }
 
   /**
-   * Get conversations from the past 3 days from OpenPhone
-   * GET /integrations/openphone/test-conversations
+   * Get recent conversations from OpenPhone
+   * GET /integrations/openphone/test-conversations?days=1
    */
   @Get('openphone/test-conversations')
-  async testOpenPhoneConversations(@WorkspaceId() workspaceId: string) {
-    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId);
+  async testOpenPhoneConversations(
+    @WorkspaceId() workspaceId: string,
+    @Query('days') days?: string,
+  ) {
+    const daysNum = days ? Math.min(Math.max(parseInt(days, 10) || 1, 1), 5) : 1;
+    const conversations = await this.integrationsService.testOpenPhoneConversations(workspaceId, daysNum);
     return { data: conversations };
   }
 

@@ -578,7 +578,7 @@ export class OpenPhoneProvider implements CommunicationProvider {
    * Single API call: GET /conversations?maxResults=50&updatedAfter=3d
    * No per-conversation message fetching — uses lastActivityAt for sorting.
    */
-  async getRecentConversations(credentialsString: string): Promise<Array<{
+  async getRecentConversations(credentialsString: string, days: number = 1): Promise<Array<{
     participantPhone: string;
     phoneNumberId: string;
     phoneNumber: string;
@@ -591,20 +591,20 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Fetch conversations from the past 3 hours
-    const threeHoursAgo = new Date();
-    threeHoursAgo.setHours(threeHoursAgo.getHours() - 3);
+    // Fetch conversations from the past N days
+    const since = new Date();
+    since.setDate(since.getDate() - days);
 
     let conversations: Array<Record<string, unknown>> = [];
     try {
       const response = await client.get('/conversations', {
         params: {
           maxResults: 50,
-          updatedAfter: threeHoursAgo.toISOString(),
+          updatedAfter: since.toISOString(),
         },
       });
       conversations = response.data.data || [];
-      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=3h)`);
+      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=${days}d)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];

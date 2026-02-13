@@ -30,6 +30,9 @@ export default function AdminIntegrationTestPage() {
   const [provisioningTest, setProvisioningTest] = useState<TestResult>({ status: 'idle' });
   const [integrationsData, setIntegrationsData] = useState<any>(null);
 
+  // Conversation fetch settings
+  const [conversationDays, setConversationDays] = useState(1);
+
   // Phone number search filters
   const [searchAreaCode, setSearchAreaCode] = useState('');
   const [searchLocality, setSearchLocality] = useState('');
@@ -383,7 +386,7 @@ export default function AdminIntegrationTestPage() {
   const testOpenPhoneConversations = async () => {
     setOpenPhoneConversationsTest({ status: 'loading', message: 'Fetching conversations from OpenPhone...' });
     try {
-      const conversations = await adminApi.testOpenPhoneConversations(10);
+      const conversations = await adminApi.testOpenPhoneConversations(conversationDays);
 
       // Save to localStorage
       localStorage.setItem('openphone_conversations', JSON.stringify(conversations));
@@ -821,6 +824,15 @@ export default function AdminIntegrationTestPage() {
                       <span className="text-gray-400">Not connected</span>
                     </div>
                   )}
+                  <select
+                    value={conversationDays}
+                    onChange={(e) => setConversationDays(Number(e.target.value))}
+                    className="input text-sm py-1.5 px-2 w-auto"
+                  >
+                    {[1, 2, 3, 4, 5].map(d => (
+                      <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>
+                    ))}
+                  </select>
                   <button
                     onClick={testOpenPhoneConversations}
                     disabled={openPhoneConversationsTest.status === 'loading'}
