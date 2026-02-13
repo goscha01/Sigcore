@@ -591,20 +591,20 @@ export class OpenPhoneProvider implements CommunicationProvider {
 
     const phoneNumberMap = await this.getPhoneNumbers(client);
 
-    // Fetch conversations from the past 3 days
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    // Fetch conversations from the past 3 hours
+    const threeHoursAgo = new Date();
+    threeHoursAgo.setHours(threeHoursAgo.getHours() - 3);
 
     let conversations: Array<Record<string, unknown>> = [];
     try {
       const response = await client.get('/conversations', {
         params: {
           maxResults: 50,
-          updatedAfter: threeDaysAgo.toISOString(),
+          updatedAfter: threeHoursAgo.toISOString(),
         },
       });
       conversations = response.data.data || [];
-      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=3d)`);
+      this.logger.log(`Fetched ${conversations.length} conversations (updatedAfter=3h)`);
     } catch (error: any) {
       this.logger.error(`Failed to fetch conversations: ${error.message}`);
       return [];
