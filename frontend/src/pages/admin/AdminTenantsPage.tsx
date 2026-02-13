@@ -77,6 +77,23 @@ export default function AdminTenantsPage() {
       setError(null);
       const tenantsData = await adminApi.getTenants();
       setTenants(tenantsData);
+
+      // Load API key counts for all tenants so collapsed cards show correct count
+      const keyResults = await Promise.all(
+        tenantsData.map(async (t: Tenant) => {
+          try {
+            const keys = await adminApi.getTenantApiKeys(t.id);
+            return { tenantId: t.id, keys };
+          } catch {
+            return { tenantId: t.id, keys: [] };
+          }
+        }),
+      );
+      const keysMap: Record<string, TenantApiKeyInfo[]> = {};
+      for (const r of keyResults) {
+        keysMap[r.tenantId] = r.keys;
+      }
+      setTenantApiKeys(keysMap);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load data');
     } finally {
